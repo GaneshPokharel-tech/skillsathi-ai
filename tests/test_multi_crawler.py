@@ -1,6 +1,6 @@
 import unittest
 
-from app.ingestion.multi_crawler import (
+from app.ingestion.crawler import (
     prepare_urls,
     page_id,
 )

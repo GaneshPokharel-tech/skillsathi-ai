@@ -1,6 +1,6 @@
 import unittest
 
-from app.ingestion.url_discovery import (
+from app.ingestion.crawler import (
     discover_public_urls,
     normalize_content_url,
 )

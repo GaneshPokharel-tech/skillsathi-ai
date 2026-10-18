@@ -6,7 +6,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from app.ingestion.cleaner import clean_markdown
-from app.ingestion.url_discovery import normalize_content_url
+from app.ingestion.crawler import normalize_content_url
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RAW_PAGES_DIR = PROJECT_ROOT / "data" / "raw" / "pages"
