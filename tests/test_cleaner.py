@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.ingestion.cleaner import clean_markdown
-from app.ingestion import clean_pages as clean_pages_module
+from app.ingestion.processor import clean_markdown
+from app.ingestion import processor as processor_module
 
 
 class TestMarkdownCleaner(unittest.TestCase):
@@ -148,15 +148,15 @@ class TestPageCleaningPipeline(unittest.TestCase):
             )
 
             with (
-                patch.object(clean_pages_module, "RAW_PAGES_DIR", raw_pages),
+                patch.object(processor_module, "RAW_PAGES_DIR", raw_pages),
                 patch.object(
-                    clean_pages_module, "PROCESSED_PAGES_DIR", processed_pages
+                    processor_module, "PROCESSED_PAGES_DIR", processed_pages
                 ),
                 patch.object(
-                    clean_pages_module, "CLEANING_REPORT_PATH", report_path
+                    processor_module, "CLEANING_REPORT_PATH", report_path
                 ),
             ):
-                report = clean_pages_module.clean_pages()
+                report = processor_module.clean_pages()
 
             self.assertEqual(
                 (report["processed"], report["skipped"], report["failed"]),
