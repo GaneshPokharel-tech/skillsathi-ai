@@ -392,3 +392,144 @@ class TestDNSPreflightEnforcement(unittest.IsolatedAsyncioTestCase):
 
                 dns_check.assert_called_once_with(scope)
                 browser.assert_not_called()
+
+
+class TestBrowserRequestGuard(unittest.IsolatedAsyncioTestCase):
+
+    async def test_allows_only_approved_https_requests(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from app.ingestion.crawler import (
+            build_crawl_scope,
+            install_request_guard,
+        )
+
+        scope = build_crawl_scope("https://example.org/")
+        context = SimpleNamespace(route=AsyncMock())
+
+        await install_request_guard(context, scope)
+
+        context.route.assert_awaited_once()
+        handler = context.route.await_args.args[1]
+
+        allowed_urls = [
+            "https://example.org/",
+            "https://example.org/courses/python",
+            "https://example.org:443/static/main.js",
+        ]
+
+        for url in allowed_urls:
+            with self.subTest(url=url):
+                route = SimpleNamespace(
+                    request=SimpleNamespace(url=url),
+                    continue_=AsyncMock(),
+                    abort=AsyncMock(),
+                )
+
+                await handler(route)
+
+                route.continue_.assert_awaited_once()
+                route.abort.assert_not_awaited()
+
+    async def test_blocks_unauthorized_requests(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from app.ingestion.crawler import (
+            build_crawl_scope,
+            install_request_guard,
+        )
+
+        scope = build_crawl_scope("https://example.org/")
+        context = SimpleNamespace(route=AsyncMock())
+
+        await install_request_guard(context, scope)
+        handler = context.route.await_args.args[1]
+
+        blocked_urls = [
+            "http://example.org/",
+            "https://evil.com/private",
+            "https://example.org.evil.com/",
+            "https://example.org:8080/",
+            "https://user:pass@example.org/",
+            "https://127.0.0.1/",
+            "https://169.254.169.254/",
+            "file:///etc/passwd",
+            "https://[::1",
+        ]
+
+        for url in blocked_urls:
+            with self.subTest(url=url):
+                route = SimpleNamespace(
+                    request=SimpleNamespace(url=url),
+                    continue_=AsyncMock(),
+                    abort=AsyncMock(),
+                )
+
+                await handler(route)
+
+                route.abort.assert_awaited_once()
+                route.continue_.assert_not_awaited()
+
+
+class TestBrowserGuardHook(unittest.IsolatedAsyncioTestCase):
+
+    async def test_registers_hook_and_blocks_external_request(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, MagicMock
+        from app.ingestion.crawler import (
+            build_crawl_scope,
+            configure_browser_request_guard,
+        )
+
+        scope = build_crawl_scope("https://example.org/")
+        browser = MagicMock()
+
+        configure_browser_request_guard(browser, scope)
+
+        set_hook = browser.crawler_strategy.set_hook
+        set_hook.assert_called_once()
+
+        hook_name, hook_callback = set_hook.call_args.args
+
+        self.assertEqual(
+            hook_name,
+            "on_page_context_created",
+        )
+
+        page = object()
+        context = SimpleNamespace(route=AsyncMock())
+
+        returned_page = await hook_callback(page, context)
+
+        self.assertIs(returned_page, page)
+        context.route.assert_awaited_once()
+
+        pattern, request_handler = context.route.await_args.args
+
+        self.assertEqual(pattern, "**/*")
+
+        blocked_route = SimpleNamespace(
+            request=SimpleNamespace(
+                url="https://evil.com/private"
+            ),
+            abort=AsyncMock(),
+            continue_=AsyncMock(),
+        )
+
+        await request_handler(blocked_route)
+
+        blocked_route.abort.assert_awaited_once()
+        blocked_route.continue_.assert_not_awaited()
+
+        allowed_route = SimpleNamespace(
+            request=SimpleNamespace(
+                url="https://example.org/courses/python"
+            ),
+            abort=AsyncMock(),
+            continue_=AsyncMock(),
+        )
+
+        await request_handler(allowed_route)
+
+        allowed_route.continue_.assert_awaited_once()
+        allowed_route.abort.assert_not_awaited()

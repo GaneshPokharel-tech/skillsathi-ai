@@ -257,6 +257,40 @@ def _save_json(path: Path, value: object) -> None:
     )
 
 
+async def install_request_guard(context, scope: CrawlScope) -> None:
+    """Restrict intercepted browser requests to the approved HTTPS host.
+
+    This is URL-level filtering, not complete SSRF protection.
+    DNS rebinding and network-level access require separate controls.
+    """
+
+    async def handle_request(route) -> None:
+        try:
+            validate_public_url(route.request.url, scope=scope)
+        except (ValueError, TypeError):
+            await route.abort()
+        else:
+            await route.continue_()
+
+    await context.route("**/*", handle_request)
+
+
+def configure_browser_request_guard(
+    browser: AsyncWebCrawler,
+    scope: CrawlScope,
+) -> None:
+    """Register request filtering before starting the browser."""
+
+    async def on_page_context_created(page, context, **kwargs):
+        await install_request_guard(context, scope)
+        return page
+
+    browser.crawler_strategy.set_hook(
+        "on_page_context_created",
+        on_page_context_created,
+    )
+
+
 def _run_config(*, content_only: bool) -> CrawlerRunConfig:
     options = dict(
         cache_mode=CacheMode.BYPASS,
@@ -281,7 +315,12 @@ async def crawl_homepage(*, scope: CrawlScope | None = None) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Starting crawl: {active_scope.base_url}")
 
-    async with AsyncWebCrawler(config=BrowserConfig(headless=True)) as crawler:
+    browser = AsyncWebCrawler(
+        config=BrowserConfig(headless=True)
+    )
+    configure_browser_request_guard(browser, active_scope)
+
+    async with browser as crawler:
         result = await crawler.arun(url=active_scope.base_url, config=_run_config(content_only=False))
 
     if not result.success:
@@ -336,7 +375,12 @@ async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
     successful = failed = 0
 
     print(f"Starting crawl of {len(urls)} pages")
-    async with AsyncWebCrawler(config=BrowserConfig(headless=True)) as crawler:
+    browser = AsyncWebCrawler(
+        config=BrowserConfig(headless=True)
+    )
+    configure_browser_request_guard(browser, active_scope)
+
+    async with browser as crawler:
         for index, url in enumerate(urls, start=1):
             print(f"\n[{index}/{len(urls)}] {url}")
             try:
