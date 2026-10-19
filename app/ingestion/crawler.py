@@ -12,14 +12,18 @@ saved data locations.
 """
 
 import argparse
+import ipaddress
+import re
 import asyncio
 import hashlib
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
+
 
 # Current ingestion scope: one approved public website.
 # Configurable-domain ingestion will be implemented in a separate step.
@@ -37,13 +41,71 @@ MAX_PAGES = 5
 REQUEST_DELAY = 2
 
 
-def validate_public_url(url: str) -> None:
+@dataclass(frozen=True)
+class CrawlScope:
+    """Immutable settings for a single, explicitly selected website."""
+
+    base_url: str
+    allowed_hosts: frozenset[str]
+    content_paths: tuple[str, ...] | None = None
+
+
+def build_crawl_scope(base_url: str) -> CrawlScope:
+    """Validate a public-looking HTTPS domain and define its crawl scope.
+
+    This is syntax/hostname validation, not a DNS or network safety check.
+    Actual network requests still require public-IP and redirect protections.
+    """
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ValueError("Base URL must be a nonempty HTTPS URL.")
+
+    try:
+        parsed = urlsplit(base_url)
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Malformed base URL.") from exc
+
+    if parsed.scheme != "https" or not host or not parsed.netloc:
+        raise ValueError("Base URL must be HTTPS with a hostname.")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Base URL cannot contain credentials.")
+    if port not in (None, 443):
+        raise ValueError("Only the default HTTPS port is allowed.")
+    if parsed.query or parsed.fragment:
+        raise ValueError("Base URL cannot contain a query or fragment.")
+
+    # Reject IP literals, including loopback, link-local, and cloud metadata IPs.
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("IP-address base URLs are not permitted.")
+
+    # Single-label, local/reserved hosts and ambiguous non-DNS host spellings
+    # are not accepted. DNS resolution is checked separately before crawling.
+    host = host.lower()
+    if (
+        not re.fullmatch(r"[a-z0-9-]+(?:\.[a-z0-9-]+)+", host)
+        or any(label.startswith("-") or label.endswith("-") for label in host.split("."))
+        or host.endswith((".localhost", ".local", ".internal", ".invalid", ".test"))
+        or host.startswith("localhost.")
+    ):
+        raise ValueError("Base URL must use a valid public DNS hostname.")
+
+    normalized_path = parsed.path.rstrip("/") + "/"
+    normalized_base = urlunsplit(("https", host, normalized_path, "", ""))
+    return CrawlScope(base_url=normalized_base, allowed_hosts=frozenset({host}))
+
+
+def validate_public_url(url: str, scope: CrawlScope | None = None) -> None:
     """Reject URLs outside the explicitly approved HTTPS hostnames."""
     parsed = urlsplit(url)
 
     if parsed.scheme != "https":
         raise ValueError(f"Only HTTPS URLs are allowed: {url}")
-    if parsed.hostname not in ALLOWED_HOSTS:
+    if parsed.hostname not in (scope.allowed_hosts if scope else ALLOWED_HOSTS):
         raise ValueError(f"Domain is not allowed: {url}")
     if parsed.username is not None or parsed.password is not None:
         raise ValueError(f"URLs with credentials are not allowed: {url}")
@@ -55,46 +117,54 @@ def validate_public_url(url: str) -> None:
         raise ValueError(f"Port is not allowed: {url}")
 
 
-def normalize_content_url(href: str) -> str | None:
-    """Normalize a permitted content URL; return None for disallowed URLs."""
-    if not isinstance(href, str) or not href:
+def normalize_content_url(href: str, *, scope: CrawlScope | None = None) -> str | None:
+    """Normalize same-scope HTTPS links, with optional legacy policy."""
+    if not isinstance(href, str) or not href.strip():
         return None
 
+    active_scope = scope or CrawlScope(
+        base_url=BASE_URL,
+        allowed_hosts=frozenset(ALLOWED_HOSTS),
+        content_paths=CONTENT_PATHS,
+    )
     try:
-        absolute = urljoin(BASE_URL, href)
-        validate_public_url(absolute)
+        absolute = urljoin(active_scope.base_url, href)
+        validate_public_url(absolute, scope=active_scope)
         parsed = urlsplit(absolute)
     except ValueError:
         return None
 
     path = parsed.path.rstrip("/") or "/"
-    if path != "/" and not any(
-        path == prefix or path.startswith(prefix + "/") for prefix in CONTENT_PATHS
-    ):
-        return None
+    if active_scope.content_paths is not None:
+        if path != "/" and not any(
+            path == prefix or path.startswith(prefix + "/")
+            for prefix in active_scope.content_paths
+        ):
+            return None
 
-    # Discard fragments and query parameters for consistent page identities.
+    # Without explicit content paths a custom scope stays on its host.
+    # Page type/privacy rules and DNS safety are enforced before network I/O.
     return urlunsplit(("https", parsed.hostname, path, "", ""))
 
 
-def discover_public_urls(links: list[dict]) -> list[str]:
+def discover_public_urls(links: list[dict], *, scope: CrawlScope | None = None) -> list[str]:
     """Extract safe, deduplicated internal content URLs."""
     discovered = set()
     for link in links:
-        url = normalize_content_url(link.get("href", ""))
+        url = normalize_content_url(link.get("href", ""), scope=scope)
         if url:
             discovered.add(url)
     return sorted(discovered)
 
 
-def prepare_urls(urls: list[str], limit: int) -> list[str]:
+def prepare_urls(urls: list[str], limit: int, *, scope: CrawlScope | None = None) -> list[str]:
     """Prefer individual course pages when selecting a limited crawl batch."""
     if limit < 1:
         raise ValueError("Page limit must be positive.")
 
     approved = set()
     for candidate in urls:
-        url = normalize_content_url(candidate)
+        url = normalize_content_url(candidate, scope=scope)
         if url and urlsplit(url).path != "/":
             approved.add(url)
 
@@ -135,7 +205,9 @@ def _extract_markdown(result) -> str:
 
 
 def _save_json(path: Path, value: object) -> None:
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
+    path.write_text(
+        json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 def _run_config(*, content_only: bool) -> CrawlerRunConfig:
@@ -150,20 +222,23 @@ def _run_config(*, content_only: bool) -> CrawlerRunConfig:
     return CrawlerRunConfig(**options)
 
 
-async def crawl_homepage() -> None:
+async def crawl_homepage(*, scope: CrawlScope | None = None) -> None:
     """Crawl homepage, save Markdown/metadata, discover allowed content URLs."""
-    validate_public_url(BASE_URL)
+    active_scope = scope or CrawlScope(
+        base_url=BASE_URL,
+        allowed_hosts=frozenset(ALLOWED_HOSTS),
+        content_paths=CONTENT_PATHS,
+    )
+    validate_public_url(active_scope.base_url, scope=active_scope)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Starting crawl: {BASE_URL}")
+    print(f"Starting crawl: {active_scope.base_url}")
 
     async with AsyncWebCrawler(config=BrowserConfig(headless=True)) as crawler:
-        result = await crawler.arun(
-            url=BASE_URL, config=_run_config(content_only=False)
-        )
+        result = await crawler.arun(url=active_scope.base_url, config=_run_config(content_only=False))
 
     if not result.success:
         raise RuntimeError(f"Website crawling failed: {result.error_message}")
-    validate_public_url(result.url)
+    validate_public_url(result.url, scope=active_scope)
     content = _extract_markdown(result)
 
     markdown_path = OUTPUT_DIR / "homepage.md"
@@ -180,7 +255,7 @@ async def crawl_homepage() -> None:
         },
     )
 
-    urls = discover_public_urls((result.links or {}).get("internal", []))
+    urls = discover_public_urls((result.links or {}).get("internal", []), scope=active_scope)
     links_path = URLS_FILE
     _save_json(links_path, urls)
 
@@ -191,7 +266,7 @@ async def crawl_homepage() -> None:
     print(f"Discovered URLs saved: {links_path}")
 
 
-async def crawl_pages() -> None:
+async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
     """Crawl the top approved pages sequentially and save content/metadata."""
     if not URLS_FILE.exists():
         raise FileNotFoundError("Run the homepage crawler first.")
@@ -200,7 +275,7 @@ async def crawl_pages() -> None:
     if not isinstance(urls_data, list):
         raise ValueError("Invalid discovered URLs file.")
 
-    urls = prepare_urls(urls_data, limit=MAX_PAGES)
+    urls = prepare_urls(urls_data, limit=MAX_PAGES, scope=scope)
     PAGES_DIR.mkdir(parents=True, exist_ok=True)
     successful = failed = 0
 
@@ -209,13 +284,11 @@ async def crawl_pages() -> None:
         for index, url in enumerate(urls, start=1):
             print(f"\n[{index}/{len(urls)}] {url}")
             try:
-                result = await crawler.arun(
-                    url=url, config=_run_config(content_only=True)
-                )
+                result = await crawler.arun(url=url, config=_run_config(content_only=True))
                 if not result.success:
                     raise RuntimeError(result.error_message or "Unknown error")
 
-                final_url = normalize_content_url(result.url)
+                final_url = normalize_content_url(result.url, scope=scope)
                 if not final_url:
                     raise ValueError("Crawl redirected outside approved content.")
 
@@ -257,9 +330,7 @@ async def crawl_pages() -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="SkillSathi website ingestion")
     parser.add_argument(
-        "--pages",
-        action="store_true",
-        help="Crawl discovered pages (default: homepage)",
+        "--pages", action="store_true", help="Crawl discovered pages (default: homepage)"
     )
     args = parser.parse_args()
     asyncio.run(crawl_pages() if args.pages else crawl_homepage())
