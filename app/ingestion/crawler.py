@@ -146,6 +146,45 @@ def validate_dns_scope(scope: CrawlScope) -> None:
             )
 
 
+@dataclass(frozen=True)
+class SiteStoragePaths:
+    """Filesystem locations belonging to one website."""
+
+    output_dir: Path
+    pages_dir: Path
+    urls_file: Path
+    homepage_md: Path
+    homepage_json: Path
+
+
+def site_storage_paths(
+    scope: CrawlScope,
+    *,
+    root: Path | None = None,
+) -> SiteStoragePaths:
+    """Build isolated paths without creating files or directories."""
+
+    host = urlsplit(scope.base_url).hostname
+
+    if (
+        not host
+        or host not in scope.allowed_hosts
+        or not re.fullmatch(r"[a-z0-9-]+(?:[.][a-z0-9-]+)+", host)
+    ):
+        raise ValueError("Invalid hostname for website storage.")
+
+    base = Path(root) if root is not None else OUTPUT_DIR
+    output_dir = base / host
+
+    return SiteStoragePaths(
+        output_dir=output_dir,
+        pages_dir=output_dir / "pages",
+        urls_file=output_dir / "discovered_urls.json",
+        homepage_md=output_dir / "homepage.md",
+        homepage_json=output_dir / "homepage.json",
+    )
+
+
 def validate_public_url(url: str, scope: CrawlScope | None = None) -> None:
     """Reject URLs outside the explicitly approved HTTPS hostnames."""
     parsed = urlsplit(url)
@@ -312,7 +351,12 @@ async def crawl_homepage(*, scope: CrawlScope | None = None) -> None:
     )
     validate_public_url(active_scope.base_url, scope=active_scope)
     validate_dns_scope(active_scope)
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    storage = (
+        site_storage_paths(active_scope, root=OUTPUT_DIR)
+        if scope is not None else None
+    )
+    output_dir = storage.output_dir if storage else OUTPUT_DIR
+    output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Starting crawl: {active_scope.base_url}")
 
     browser = AsyncWebCrawler(
@@ -328,10 +372,10 @@ async def crawl_homepage(*, scope: CrawlScope | None = None) -> None:
     validate_public_url(result.url, scope=active_scope)
     content = _extract_markdown(result)
 
-    markdown_path = OUTPUT_DIR / "homepage.md"
+    markdown_path = output_dir / "homepage.md"
     markdown_path.write_text(content, encoding="utf-8")
 
-    metadata_path = OUTPUT_DIR / "homepage.json"
+    metadata_path = output_dir / "homepage.json"
     _save_json(
         metadata_path,
         {
@@ -343,7 +387,7 @@ async def crawl_homepage(*, scope: CrawlScope | None = None) -> None:
     )
 
     urls = discover_public_urls((result.links or {}).get("internal", []), scope=active_scope)
-    links_path = URLS_FILE
+    links_path = storage.urls_file if storage else URLS_FILE
     _save_json(links_path, urls)
 
     print(f"Markdown saved: {markdown_path}")
@@ -363,15 +407,22 @@ async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
     validate_public_url(active_scope.base_url, scope=active_scope)
     validate_dns_scope(active_scope)
 
-    if not URLS_FILE.exists():
+    storage = (
+        site_storage_paths(active_scope, root=OUTPUT_DIR)
+        if scope is not None else None
+    )
+    urls_file = storage.urls_file if storage else URLS_FILE
+    pages_dir = storage.pages_dir if storage else PAGES_DIR
+
+    if not urls_file.exists():
         raise FileNotFoundError("Run the homepage crawler first.")
 
-    urls_data = json.loads(URLS_FILE.read_text(encoding="utf-8"))
+    urls_data = json.loads(urls_file.read_text(encoding="utf-8"))
     if not isinstance(urls_data, list):
         raise ValueError("Invalid discovered URLs file.")
 
     urls = prepare_urls(urls_data, limit=MAX_PAGES, scope=active_scope)
-    PAGES_DIR.mkdir(parents=True, exist_ok=True)
+    pages_dir.mkdir(parents=True, exist_ok=True)
     successful = failed = 0
 
     print(f"Starting crawl of {len(urls)} pages")
@@ -394,10 +445,10 @@ async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
 
                 content = _extract_markdown(result)
                 identifier = page_id(final_url)
-                markdown_path = PAGES_DIR / f"{identifier}.md"
+                markdown_path = pages_dir / f"{identifier}.md"
                 markdown_path.write_text(content, encoding="utf-8")
 
-                metadata_path = PAGES_DIR / f"{identifier}.json"
+                metadata_path = pages_dir / f"{identifier}.json"
                 _save_json(
                     metadata_path,
                     {
@@ -424,7 +475,7 @@ async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
     print(f"Attempted: {len(urls)}")
     print(f"Successful: {successful}")
     print(f"Failed: {failed}")
-    print(f"Output directory: {PAGES_DIR}")
+    print(f"Output directory: {pages_dir}")
 
 
 def main() -> None:

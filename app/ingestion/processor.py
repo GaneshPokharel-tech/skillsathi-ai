@@ -169,7 +169,12 @@ PROCESSED_PAGES_DIR = PROJECT_ROOT / "data" / "processed" / "pages"
 CLEANING_REPORT_PATH = PROJECT_ROOT / "data" / "processed" / "cleaning_report.json"
 
 
-def _process_page(markdown_path: Path) -> dict[str, Any]:
+def _process_page(
+    markdown_path: Path,
+    *,
+    scope=None,
+    output_dir: Path | None = None,
+) -> dict[str, Any]:
     result: dict[str, Any] = {
         "file": markdown_path.name,
         "status": "failed",
@@ -193,7 +198,7 @@ def _process_page(markdown_path: Path) -> dict[str, Any]:
 
         source_url = metadata.get("source_url")
         approved_url = (
-            normalize_content_url(source_url) if isinstance(source_url, str) else None
+            normalize_content_url(source_url, scope=scope) if isinstance(source_url, str) else None
         )
         if not approved_url or urlsplit(approved_url).path == "/":
             result.update(status="skipped", reason="Source URL is not approved content.")
@@ -218,12 +223,13 @@ def _process_page(markdown_path: Path) -> dict[str, Any]:
             ).hexdigest(),
         }
 
-        PROCESSED_PAGES_DIR.mkdir(parents=True, exist_ok=True)
-        (PROCESSED_PAGES_DIR / markdown_path.name).write_text(
+        destination = output_dir if output_dir is not None else PROCESSED_PAGES_DIR
+        destination.mkdir(parents=True, exist_ok=True)
+        (destination / markdown_path.name).write_text(
             cleaned_content,
             encoding="utf-8",
         )
-        (PROCESSED_PAGES_DIR / metadata_path.name).write_text(
+        (destination / metadata_path.name).write_text(
             json.dumps(output_metadata, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
@@ -234,12 +240,36 @@ def _process_page(markdown_path: Path) -> dict[str, Any]:
         return result
 
 
-def clean_pages() -> dict[str, Any]:
+def clean_pages(*, scope=None) -> dict[str, Any]:
     """Clean approved raw Markdown pages and write a per-page processing report."""
 
-    page_results = [
-        _process_page(path) for path in sorted(RAW_PAGES_DIR.glob("*.md"))
-    ]
+    if scope is None:
+        # Preserve existing SkillShikshya processing behavior.
+        raw_dir = RAW_PAGES_DIR
+        report_path = CLEANING_REPORT_PATH
+        page_results = [
+            _process_page(path)
+            for path in sorted(raw_dir.glob("*.md"))
+        ]
+    else:
+        from app.ingestion.crawler import site_storage_paths
+
+        raw_dir = site_storage_paths(
+            scope, root=RAW_PAGES_DIR.parent
+        ).pages_dir
+
+        processed_storage = site_storage_paths(
+            scope, root=PROCESSED_PAGES_DIR.parent
+        )
+        output_dir = processed_storage.pages_dir
+        report_path = (
+            processed_storage.output_dir / "cleaning_report.json"
+        )
+
+        page_results = [
+            _process_page(path, scope=scope, output_dir=output_dir)
+            for path in sorted(raw_dir.glob("*.md"))
+        ]
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "processed": sum(page["status"] == "processed" for page in page_results),
@@ -248,8 +278,8 @@ def clean_pages() -> dict[str, Any]:
         "pages": page_results,
     }
 
-    CLEANING_REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CLEANING_REPORT_PATH.write_text(
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
         json.dumps(report, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )

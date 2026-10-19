@@ -166,7 +166,7 @@ class TestScopedCrawlExecution(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp)
-            links_file = output / "discovered_urls.json"
+            links_file = output / "example.org" / "discovered_urls.json"
 
             with (
                 patch.object(crawler, "validate_dns_scope", return_value=None),
@@ -222,9 +222,10 @@ class TestScopedPageExecution(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            urls_file = root / "discovered_urls.json"
-            pages_dir = root / "pages"
+            urls_file = root / "example.org" / "discovered_urls.json"
+            pages_dir = root / "example.org" / "pages"
 
+            urls_file.parent.mkdir(parents=True, exist_ok=True)
             urls_file.write_text(
                 json.dumps([
                     "https://example.org/courses/python",
@@ -237,6 +238,7 @@ class TestScopedPageExecution(unittest.IsolatedAsyncioTestCase):
             with (
                 patch.object(crawler, "validate_dns_scope", return_value=None),
                 patch.object(crawler, "AsyncWebCrawler", return_value=browser),
+                patch.object(crawler, "OUTPUT_DIR", root),
                 patch.object(crawler, "URLS_FILE", urls_file),
                 patch.object(crawler, "PAGES_DIR", pages_dir),
                 patch.object(crawler, "REQUEST_DELAY", 0),
@@ -533,3 +535,137 @@ class TestBrowserGuardHook(unittest.IsolatedAsyncioTestCase):
 
         allowed_route.continue_.assert_awaited_once()
         allowed_route.abort.assert_not_awaited()
+
+
+class TestSiteStorageIsolation(unittest.TestCase):
+
+    def test_different_domains_use_separate_storage(self):
+        import tempfile
+        from pathlib import Path
+        from app.ingestion.crawler import (
+            build_crawl_scope,
+            site_storage_paths,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            raw_dir = Path(tmp) / "raw"
+
+            skill = site_storage_paths(
+                build_crawl_scope("https://skillshikshya.com/"),
+                root=raw_dir,
+            )
+            other = site_storage_paths(
+                build_crawl_scope("https://example.org/"),
+                root=raw_dir,
+            )
+
+            self.assertEqual(
+                skill.output_dir,
+                raw_dir / "skillshikshya.com",
+            )
+            self.assertEqual(
+                other.output_dir,
+                raw_dir / "example.org",
+            )
+            self.assertNotEqual(skill.output_dir, other.output_dir)
+
+            for paths in (skill, other):
+                self.assertEqual(
+                    paths.urls_file,
+                    paths.output_dir / "discovered_urls.json",
+                )
+                self.assertEqual(
+                    paths.pages_dir,
+                    paths.output_dir / "pages",
+                )
+
+    def test_path_generation_does_not_create_files(self):
+        import tempfile
+        from pathlib import Path
+        from app.ingestion.crawler import (
+            build_crawl_scope,
+            site_storage_paths,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            raw_dir = Path(tmp) / "raw"
+
+            site_storage_paths(
+                build_crawl_scope("https://example.org/"),
+                root=raw_dir,
+            )
+
+            self.assertFalse(raw_dir.exists())
+
+
+class TestScopedCrawlerStorage(unittest.IsolatedAsyncioTestCase):
+
+    async def test_homepage_writes_into_site_directory(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.ingestion import crawler
+
+        scope = crawler.build_crawl_scope("https://example.org/")
+
+        response = SimpleNamespace(
+            success=True,
+            url="https://example.org/",
+            markdown="# Example Courses\n\nLearn Python.",
+            links={
+                "internal": [
+                    {"href": "/courses/python"}
+                ]
+            },
+        )
+
+        worker = MagicMock()
+        worker.arun = AsyncMock(return_value=response)
+
+        browser = MagicMock()
+        browser.__aenter__ = AsyncMock(return_value=worker)
+        browser.__aexit__ = AsyncMock(return_value=False)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            raw_root = Path(tmp) / "raw"
+
+            with (
+                patch.object(crawler, "OUTPUT_DIR", raw_root),
+                patch.object(
+                    crawler, "URLS_FILE",
+                    raw_root / "discovered_urls.json"
+                ),
+                patch.object(
+                    crawler, "validate_dns_scope", return_value=None
+                ),
+                patch.object(
+                    crawler, "AsyncWebCrawler", return_value=browser
+                ),
+            ):
+                await crawler.crawl_homepage(scope=scope)
+
+            site_dir = raw_root / "example.org"
+
+            self.assertTrue((site_dir / "homepage.md").exists())
+            self.assertTrue((site_dir / "homepage.json").exists())
+            self.assertTrue(
+                (site_dir / "discovered_urls.json").exists()
+            )
+
+            urls = json.loads(
+                (site_dir / "discovered_urls.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                urls,
+                ["https://example.org/courses/python"],
+            )
+
+            self.assertFalse((raw_root / "homepage.md").exists())
+            self.assertFalse(
+                (raw_root / "discovered_urls.json").exists()
+            )

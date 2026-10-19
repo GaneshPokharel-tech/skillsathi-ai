@@ -195,3 +195,219 @@ class TestPageCleaningPipeline(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from unittest import TestCase
+
+
+class TestScopedProcessorIsolation(TestCase):
+
+    def test_processes_only_selected_website(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        from app.ingestion import processor
+        from app.ingestion.crawler import build_crawl_scope
+
+        scope = build_crawl_scope("https://example.org/")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_root = root / "raw"
+            processed_root = root / "processed"
+
+            site_pages = raw_root / "example.org" / "pages"
+            site_pages.mkdir(parents=True)
+
+            # Approved course belonging to the selected website.
+            (site_pages / "python.md").write_text(
+                "# Python Course\n\nLearn Python programming.",
+                encoding="utf-8",
+            )
+            (site_pages / "python.json").write_text(
+                json.dumps({
+                    "source_url": "https://example.org/courses/python",
+                    "crawled_at": "2026-10-19T10:00:00+00:00",
+                }),
+                encoding="utf-8",
+            )
+
+            # External-domain metadata must never be approved.
+            (site_pages / "external.md").write_text(
+                "# External Course\n\nUntrusted content.",
+                encoding="utf-8",
+            )
+            (site_pages / "external.json").write_text(
+                json.dumps({
+                    "source_url": "https://other-site.com/courses/python",
+                    "crawled_at": "2026-10-19T10:00:00+00:00",
+                }),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(
+                    processor,
+                    "RAW_PAGES_DIR",
+                    raw_root / "pages",
+                ),
+                patch.object(
+                    processor,
+                    "PROCESSED_PAGES_DIR",
+                    processed_root / "pages",
+                ),
+                patch.object(
+                    processor,
+                    "CLEANING_REPORT_PATH",
+                    processed_root / "cleaning_report.json",
+                ),
+            ):
+                report = processor.clean_pages(scope=scope)
+
+            output = processed_root / "example.org"
+
+            self.assertEqual(report["processed"], 1)
+            self.assertEqual(report["skipped"], 1)
+
+            self.assertTrue(
+                (output / "pages" / "python.md").exists()
+            )
+            self.assertFalse(
+                (output / "pages" / "external.md").exists()
+            )
+            self.assertTrue(
+                (output / "cleaning_report.json").exists()
+            )
+
+            # No accidental writes to the legacy shared folder.
+            self.assertFalse(
+                (processed_root / "pages").exists()
+            )
+
+
+from unittest import IsolatedAsyncioTestCase
+
+
+class TestScopedIngestionPipeline(IsolatedAsyncioTestCase):
+
+    async def test_crawler_to_processor_storage_consistency(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.ingestion import crawler, processor
+
+        scope = crawler.build_crawl_scope("https://example.org/")
+
+        async def fake_crawl(*, url, config):
+            if url == "https://example.org/":
+                return SimpleNamespace(
+                    success=True,
+                    url=url,
+                    markdown="# Example Academy\n\nLearn new skills.",
+                    links={
+                        "internal": [
+                            {"href": "/courses/python"},
+                            {"href": "https://evil.com/private"},
+                        ]
+                    },
+                )
+
+            if url == "https://example.org/courses/python":
+                return SimpleNamespace(
+                    success=True,
+                    url=url,
+                    markdown=(
+                        "# Python Programming Course\n\n"
+                        "Learn Python programming fundamentals."
+                    ),
+                )
+
+            raise AssertionError(f"Unexpected crawl URL: {url}")
+
+        worker = MagicMock()
+        worker.arun = AsyncMock(side_effect=fake_crawl)
+
+        browser = MagicMock()
+        browser.__aenter__ = AsyncMock(return_value=worker)
+        browser.__aexit__ = AsyncMock(return_value=False)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw_root = root / "raw"
+            processed_root = root / "processed"
+
+            with (
+                patch.object(crawler, "OUTPUT_DIR", raw_root),
+                patch.object(
+                    crawler, "URLS_FILE",
+                    raw_root / "legacy_urls.json"
+                ),
+                patch.object(
+                    crawler, "PAGES_DIR",
+                    raw_root / "legacy_pages"
+                ),
+                patch.object(
+                    crawler, "validate_dns_scope",
+                    return_value=None
+                ),
+                patch.object(
+                    crawler, "AsyncWebCrawler",
+                    return_value=browser
+                ),
+                patch.object(
+                    processor, "RAW_PAGES_DIR",
+                    raw_root / "pages"
+                ),
+                patch.object(
+                    processor, "PROCESSED_PAGES_DIR",
+                    processed_root / "pages"
+                ),
+                patch.object(
+                    processor, "CLEANING_REPORT_PATH",
+                    processed_root / "legacy_report.json"
+                ),
+            ):
+                await crawler.crawl_homepage(scope=scope)
+                await crawler.crawl_pages(scope=scope)
+                report = processor.clean_pages(scope=scope)
+
+            page_name = crawler.page_id(
+                "https://example.org/courses/python"
+            )
+
+            raw_page = (
+                raw_root / "example.org" /
+                "pages" / f"{page_name}.md"
+            )
+            cleaned_page = (
+                processed_root / "example.org" /
+                "pages" / f"{page_name}.md"
+            )
+            metadata_file = cleaned_page.with_suffix(".json")
+
+            self.assertEqual(worker.arun.await_count, 2)
+            self.assertTrue(raw_page.exists())
+            self.assertTrue(cleaned_page.exists())
+            self.assertTrue(metadata_file.exists())
+            self.assertEqual(report["processed"], 1)
+            self.assertEqual(report["failed"], 0)
+
+            metadata = json.loads(
+                metadata_file.read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                metadata["source_url"],
+                "https://example.org/courses/python",
+            )
+
+            self.assertFalse(
+                (raw_root / "legacy_urls.json").exists()
+            )
+            self.assertFalse(
+                (processed_root / "pages").exists()
+            )
