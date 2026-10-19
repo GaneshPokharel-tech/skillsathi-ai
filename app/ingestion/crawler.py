@@ -13,6 +13,7 @@ saved data locations.
 
 import argparse
 import ipaddress
+import socket
 import re
 import asyncio
 import hashlib
@@ -97,6 +98,52 @@ def build_crawl_scope(base_url: str) -> CrawlScope:
     normalized_path = parsed.path.rstrip("/") + "/"
     normalized_base = urlunsplit(("https", host, normalized_path, "", ""))
     return CrawlScope(base_url=normalized_base, allowed_hosts=frozenset({host}))
+
+
+def validate_dns_scope(scope: CrawlScope) -> None:
+    """Reject DNS results containing non-public IP addresses.
+
+    This is a preflight check only. Browser-level request restrictions
+    are still required to defend against DNS rebinding and SSRF.
+    """
+    hostname = urlsplit(scope.base_url).hostname
+
+    if not hostname:
+        raise ValueError("Missing hostname for DNS validation.")
+
+    try:
+        records = socket.getaddrinfo(
+            hostname,
+            443,
+            type=socket.SOCK_STREAM,
+        )
+    except OSError as exc:
+        raise ValueError("DNS resolution failed.") from exc
+
+    if not records:
+        raise ValueError("DNS resolution returned no addresses.")
+
+    for record in records:
+        try:
+            family = record[0]
+
+            if family not in (socket.AF_INET, socket.AF_INET6):
+                raise ValueError("Unsupported DNS address family.")
+
+            address = ipaddress.ip_address(record[4][0])
+
+        except (IndexError, TypeError, ValueError) as exc:
+            raise ValueError("Invalid DNS resolution result.") from exc
+
+        # Ensure IPv4-mapped IPv6 addresses receive IPv4 checks.
+        if isinstance(address, ipaddress.IPv6Address):
+            if address.ipv4_mapped is not None:
+                address = address.ipv4_mapped
+
+        if not address.is_global:
+            raise ValueError(
+                f"DNS resolved to a non-public IP: {address}"
+            )
 
 
 def validate_public_url(url: str, scope: CrawlScope | None = None) -> None:
@@ -230,6 +277,7 @@ async def crawl_homepage(*, scope: CrawlScope | None = None) -> None:
         content_paths=CONTENT_PATHS,
     )
     validate_public_url(active_scope.base_url, scope=active_scope)
+    validate_dns_scope(active_scope)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Starting crawl: {active_scope.base_url}")
 
@@ -268,6 +316,14 @@ async def crawl_homepage(*, scope: CrawlScope | None = None) -> None:
 
 async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
     """Crawl the top approved pages sequentially and save content/metadata."""
+    active_scope = scope or CrawlScope(
+        base_url=BASE_URL,
+        allowed_hosts=frozenset(ALLOWED_HOSTS),
+        content_paths=CONTENT_PATHS,
+    )
+    validate_public_url(active_scope.base_url, scope=active_scope)
+    validate_dns_scope(active_scope)
+
     if not URLS_FILE.exists():
         raise FileNotFoundError("Run the homepage crawler first.")
 
@@ -275,7 +331,7 @@ async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
     if not isinstance(urls_data, list):
         raise ValueError("Invalid discovered URLs file.")
 
-    urls = prepare_urls(urls_data, limit=MAX_PAGES, scope=scope)
+    urls = prepare_urls(urls_data, limit=MAX_PAGES, scope=active_scope)
     PAGES_DIR.mkdir(parents=True, exist_ok=True)
     successful = failed = 0
 
@@ -288,7 +344,7 @@ async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
                 if not result.success:
                     raise RuntimeError(result.error_message or "Unknown error")
 
-                final_url = normalize_content_url(result.url, scope=scope)
+                final_url = normalize_content_url(result.url, scope=active_scope)
                 if not final_url:
                     raise ValueError("Crawl redirected outside approved content.")
 

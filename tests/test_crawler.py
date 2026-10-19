@@ -169,6 +169,7 @@ class TestScopedCrawlExecution(unittest.IsolatedAsyncioTestCase):
             links_file = output / "discovered_urls.json"
 
             with (
+                patch.object(crawler, "validate_dns_scope", return_value=None),
                 patch.object(
                     crawler,
                     "AsyncWebCrawler",
@@ -234,6 +235,7 @@ class TestScopedPageExecution(unittest.IsolatedAsyncioTestCase):
             )
 
             with (
+                patch.object(crawler, "validate_dns_scope", return_value=None),
                 patch.object(crawler, "AsyncWebCrawler", return_value=browser),
                 patch.object(crawler, "URLS_FILE", urls_file),
                 patch.object(crawler, "PAGES_DIR", pages_dir),
@@ -249,3 +251,144 @@ class TestScopedPageExecution(unittest.IsolatedAsyncioTestCase):
             "https://example.org/courses/python",
         )
         self.assertEqual(len(saved_pages), 1)
+
+
+class TestDNSSecurity(unittest.TestCase):
+
+    def test_accepts_public_dns_resolution(self):
+        import socket
+        from unittest.mock import patch
+        from app.ingestion.crawler import (
+            build_crawl_scope,
+            validate_dns_scope,
+        )
+
+        scope = build_crawl_scope("https://example.org/")
+        records = [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                6,
+                "",
+                ("8.8.8.8", 443),
+            )
+        ]
+
+        with patch("socket.getaddrinfo", return_value=records):
+            self.assertIsNone(validate_dns_scope(scope))
+
+    def test_rejects_private_or_mixed_dns_results(self):
+        import socket
+        from unittest.mock import patch
+        from app.ingestion.crawler import (
+            build_crawl_scope,
+            validate_dns_scope,
+        )
+
+        scope = build_crawl_scope("https://example.org/")
+
+        for addresses in [
+            ["127.0.0.1"],
+            ["192.168.1.10"],
+            ["169.254.169.254"],
+            ["10.0.0.5"],
+            ["8.8.8.8", "127.0.0.1"],
+            ["::1"],
+            ["fc00::1"],
+        ]:
+            with self.subTest(addresses=addresses):
+                records = [
+                    (
+                        socket.AF_INET6 if ":" in address else socket.AF_INET,
+                        socket.SOCK_STREAM,
+                        6,
+                        "",
+                        (address, 443),
+                    )
+                    for address in addresses
+                ]
+
+                with patch("socket.getaddrinfo", return_value=records):
+                    with self.assertRaises(ValueError):
+                        validate_dns_scope(scope)
+
+    def test_fails_closed_when_dns_unavailable(self):
+        import socket
+        from unittest.mock import patch
+        from app.ingestion.crawler import (
+            build_crawl_scope,
+            validate_dns_scope,
+        )
+
+        scope = build_crawl_scope("https://example.org/")
+
+        with patch(
+            "socket.getaddrinfo",
+            side_effect=socket.gaierror("DNS failed"),
+        ):
+            with self.assertRaises(ValueError):
+                validate_dns_scope(scope)
+
+        with patch("socket.getaddrinfo", return_value=[]):
+            with self.assertRaises(ValueError):
+                validate_dns_scope(scope)
+
+
+class TestDNSPreflightEnforcement(unittest.IsolatedAsyncioTestCase):
+
+    async def test_homepage_blocks_unsafe_dns_before_browser(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.ingestion import crawler
+
+        scope = crawler.build_crawl_scope("https://example.org/")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with (
+                patch.object(crawler, "OUTPUT_DIR", Path(tmp)),
+                patch.object(
+                    crawler,
+                    "validate_dns_scope",
+                    side_effect=ValueError("Unsafe DNS"),
+                ) as dns_check,
+                patch.object(crawler, "AsyncWebCrawler") as browser,
+            ):
+                with self.assertRaisesRegex(ValueError, "Unsafe DNS"):
+                    await crawler.crawl_homepage(scope=scope)
+
+                dns_check.assert_called_once_with(scope)
+                browser.assert_not_called()
+
+    async def test_pages_block_unsafe_dns_before_browser(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.ingestion import crawler
+
+        scope = crawler.build_crawl_scope("https://example.org/")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            urls_file = root / "discovered_urls.json"
+            urls_file.write_text(
+                json.dumps(["https://example.org/courses/python"]),
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(crawler, "URLS_FILE", urls_file),
+                patch.object(crawler, "PAGES_DIR", root / "pages"),
+                patch.object(
+                    crawler,
+                    "validate_dns_scope",
+                    side_effect=ValueError("Unsafe DNS"),
+                ) as dns_check,
+                patch.object(crawler, "AsyncWebCrawler") as browser,
+            ):
+                with self.assertRaisesRegex(ValueError, "Unsafe DNS"):
+                    await crawler.crawl_pages(scope=scope)
+
+                dns_check.assert_called_once_with(scope)
+                browser.assert_not_called()
