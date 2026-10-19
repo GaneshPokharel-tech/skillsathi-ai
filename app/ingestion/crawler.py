@@ -483,8 +483,20 @@ def main() -> None:
     parser.add_argument(
         "--pages", action="store_true", help="Crawl discovered pages (default: homepage)"
     )
+    parser.add_argument(
+        "--url",
+        type=str,
+        help="HTTPS base URL to crawl (default: SkillShikshya)",
+    )
     args = parser.parse_args()
-    asyncio.run(crawl_pages() if args.pages else crawl_homepage())
+
+    scope = build_crawl_scope(args.url) if args.url else None
+
+    asyncio.run(
+        crawl_pages(scope=scope)
+        if args.pages
+        else crawl_homepage(scope=scope)
+    )
 
 
 if __name__ == "__main__":

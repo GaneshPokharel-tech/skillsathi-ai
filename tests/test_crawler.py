@@ -669,3 +669,72 @@ class TestScopedCrawlerStorage(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(
                 (raw_root / "discovered_urls.json").exists()
             )
+
+
+class TestCrawlerCLI(unittest.TestCase):
+
+    def test_custom_url_reaches_homepage_crawler(self):
+        from unittest.mock import patch, sentinel
+        from app.ingestion import crawler
+
+        with (
+            patch("sys.argv", [
+                "crawler.py", "--url", "https://example.org/"
+            ]),
+            patch.object(
+                crawler, "crawl_homepage",
+                return_value=sentinel.homepage_job
+            ) as homepage,
+            patch.object(crawler.asyncio, "run") as run,
+        ):
+            crawler.main()
+
+        homepage.assert_called_once()
+        scope = homepage.call_args.kwargs["scope"]
+        self.assertEqual(scope.base_url, "https://example.org/")
+        run.assert_called_once()
+        job = run.call_args.args[0]
+        if crawler.asyncio.iscoroutine(job):
+            job.close()
+        self.assertTrue(crawler.asyncio.iscoroutine(job))
+
+    def test_custom_url_reaches_pages_crawler(self):
+        from unittest.mock import patch, sentinel
+        from app.ingestion import crawler
+
+        with (
+            patch("sys.argv", [
+                "crawler.py", "--pages",
+                "--url", "https://example.org/"
+            ]),
+            patch.object(
+                crawler, "crawl_pages",
+                return_value=sentinel.pages_job
+            ) as pages,
+            patch.object(crawler.asyncio, "run") as run,
+        ):
+            crawler.main()
+
+        pages.assert_called_once()
+        scope = pages.call_args.kwargs["scope"]
+        self.assertEqual(scope.base_url, "https://example.org/")
+        run.assert_called_once()
+        job = run.call_args.args[0]
+        if crawler.asyncio.iscoroutine(job):
+            job.close()
+        self.assertTrue(crawler.asyncio.iscoroutine(job))
+
+    def test_rejects_insecure_cli_url(self):
+        from unittest.mock import patch
+        from app.ingestion import crawler
+
+        with (
+            patch("sys.argv", [
+                "crawler.py", "--url", "http://example.org/"
+            ]),
+            patch.object(crawler.asyncio, "run") as run,
+        ):
+            with self.assertRaises(ValueError):
+                crawler.main()
+
+        run.assert_not_called()

@@ -286,12 +286,44 @@ def clean_pages(*, scope=None) -> dict[str, Any]:
     return report
 
 
-if __name__ == "__main__":
-    cleaning_report = clean_pages()
+def main(argv: list[str] | None = None) -> None:
+    """Run cleaning for the selected website."""
+    import argparse
+    from app.ingestion.crawler import (
+        build_crawl_scope,
+        site_storage_paths,
+    )
+
+    parser = argparse.ArgumentParser(
+        description="SkillSathi website content processing"
+    )
+    parser.add_argument(
+        "--url",
+        type=str,
+        help="HTTPS website URL (default: legacy SkillShikshya data)",
+    )
+    args = parser.parse_args(argv)
+
+    scope = build_crawl_scope(args.url) if args.url else None
+    report = clean_pages(scope=scope)
+
+    report_path = (
+        site_storage_paths(
+            scope,
+            root=PROCESSED_PAGES_DIR.parent,
+        ).output_dir / "cleaning_report.json"
+        if scope is not None
+        else CLEANING_REPORT_PATH
+    )
+
     print(
         "Cleaning complete: "
-        f"processed={cleaning_report['processed']}, "
-        f"skipped={cleaning_report['skipped']}, "
-        f"failed={cleaning_report['failed']}"
+        f"processed={report['processed']}, "
+        f"skipped={report['skipped']}, "
+        f"failed={report['failed']}"
     )
-    print(f"Report: {CLEANING_REPORT_PATH}")
+    print(f"Report: {report_path}")
+
+
+if __name__ == "__main__":
+    main()

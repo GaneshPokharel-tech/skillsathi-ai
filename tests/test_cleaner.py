@@ -411,3 +411,44 @@ class TestScopedIngestionPipeline(IsolatedAsyncioTestCase):
             self.assertFalse(
                 (processed_root / "pages").exists()
             )
+
+
+class TestProcessorCLI(TestCase):
+
+    def test_custom_url_reaches_processor(self):
+        from unittest.mock import patch
+        from app.ingestion import processor
+
+        report = {"processed": 1, "skipped": 0, "failed": 0}
+
+        with patch.object(
+            processor, "clean_pages", return_value=report
+        ) as clean:
+            processor.main(["--url", "https://example.org/"])
+
+        clean.assert_called_once()
+        scope = clean.call_args.kwargs["scope"]
+        self.assertEqual(scope.base_url, "https://example.org/")
+
+    def test_default_uses_legacy_processing(self):
+        from unittest.mock import patch
+        from app.ingestion import processor
+
+        report = {"processed": 0, "skipped": 0, "failed": 0}
+
+        with patch.object(
+            processor, "clean_pages", return_value=report
+        ) as clean:
+            processor.main([])
+
+        clean.assert_called_once_with(scope=None)
+
+    def test_rejects_insecure_url_before_processing(self):
+        from unittest.mock import patch
+        from app.ingestion import processor
+
+        with patch.object(processor, "clean_pages") as clean:
+            with self.assertRaises(ValueError):
+                processor.main(["--url", "http://example.org/"])
+
+        clean.assert_not_called()
