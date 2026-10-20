@@ -1,5 +1,7 @@
 """SkillSathi AI: document chunking and RAG utilities."""
 
+from pathlib import Path
+
 import re
 import uuid
 
@@ -297,3 +299,83 @@ def search_chunks(
         )
 
     return results
+
+
+MODEL_NAME = "BAAI/bge-small-en-v1.5"
+COLLECTION_NAME = "skillshikshya_bge_small_en_v15"
+QDRANT_PATH = Path(__file__).resolve().parents[2] / "data" / "qdrant"
+
+
+def retrieve_evidence(
+    question: str,
+    *,
+    limit: int = 5,
+    collection_name: str = COLLECTION_NAME,
+) -> list[dict]:
+    """Retrieve source-linked evidence for a student question."""
+    from fastembed import TextEmbedding
+    from qdrant_client import QdrantClient
+
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError("Question must not be empty.")
+
+    if limit < 1:
+        raise ValueError("Retrieval limit must be positive.")
+
+    if not QDRANT_PATH.is_dir():
+        raise FileNotFoundError(
+            "Qdrant database not found. Index content first."
+        )
+
+    client = QdrantClient(path=str(QDRANT_PATH))
+
+    try:
+        if not client.collection_exists(collection_name):
+            raise ValueError(
+                f"Collection not found: {collection_name}"
+            )
+
+        model = TextEmbedding(model_name=MODEL_NAME)
+        vector = next(model.embed([question])).tolist()
+
+        return search_chunks(
+            client,
+            collection_name=collection_name,
+            query_vector=vector,
+            limit=limit,
+        )
+    finally:
+        client.close()
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="SkillSathi semantic search"
+    )
+    parser.add_argument("--question", required=True)
+    parser.add_argument("--top-k", type=int, default=5)
+
+    args = parser.parse_args()
+
+    results = retrieve_evidence(
+        args.question,
+        limit=args.top_k,
+    )
+
+    print("\n=== SKILLSATHI AI RETRIEVAL ===")
+    print("Question:", args.question)
+
+    for rank, result in enumerate(results, 1):
+        print(f"\n[{rank}] Score: {result['score']:.4f}")
+        print("Title:", result.get("document_title"))
+        print("Section:", result.get("section"))
+        print("Source:", result.get("source_url"))
+        print("Evidence:", result.get("text", "")[:350])
+
+    print(f"\nRetrieved {len(results)} chunks.")
+
+
+if __name__ == "__main__":
+    main()

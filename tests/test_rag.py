@@ -189,3 +189,54 @@ class TestQdrantVectorStore(unittest.TestCase):
 
         finally:
             client.close()
+
+
+class TestRAGRetrievalInterface(unittest.TestCase):
+
+    def test_rejects_empty_questions(self):
+        from app.rag.engine import retrieve_evidence
+
+        for question in ("", "   "):
+            with self.subTest(question=question):
+                with self.assertRaises(ValueError):
+                    retrieve_evidence(question)
+
+    def test_cli_forwards_question_and_displays_citation(self):
+        import io
+        from unittest.mock import patch
+        from app.rag import engine
+
+        question = "What does the cybersecurity course teach?"
+        source = (
+            "https://skillshikshya.com/courses/"
+            "cybersecurity-job-ready-program-in-nepal"
+        )
+
+        fake_results = [{
+            "score": 0.85,
+            "document_title": "Cybersecurity Course",
+            "section": "Skills You Will Learn",
+            "source_url": source,
+            "text": "Network security and ethical hacking.",
+        }]
+
+        with (
+            patch(
+                "sys.argv",
+                ["engine.py", "--question", question, "--top-k", "2"],
+            ),
+            patch.object(
+                engine,
+                "retrieve_evidence",
+                return_value=fake_results,
+            ) as retrieve,
+            patch("sys.stdout", new_callable=io.StringIO) as output,
+        ):
+            engine.main()
+
+        retrieve.assert_called_once_with(question, limit=2)
+
+        printed = output.getvalue()
+        self.assertIn(source, printed)
+        self.assertIn("Skills You Will Learn", printed)
+        self.assertIn("Network security", printed)
