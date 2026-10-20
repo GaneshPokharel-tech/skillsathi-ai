@@ -2,8 +2,11 @@
 
 import logging
 from threading import Lock
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from pathlib import Path
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.rag.engine import ask_skillsathi
@@ -25,6 +28,7 @@ class ChatRequest(BaseModel):
 
     question: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=4, strict=True, ge=1, le=10)
+    language: Literal["ne", "en"] = "ne"
 
     @field_validator("question")
     @classmethod
@@ -47,6 +51,15 @@ class ChatResponse(BaseModel):
     retrieved_chunks: int = Field(ge=0)
 
 
+@app.get("/", include_in_schema=False)
+def chat_page() -> FileResponse:
+    """Serve the same-origin student chat interface."""
+    return FileResponse(
+        Path(__file__).with_name("chat.html"),
+        media_type="text/html",
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     """Liveness check; does not verify Qdrant or Gemini."""
@@ -61,6 +74,7 @@ def chat(request: ChatRequest) -> ChatResponse:
             result = ask_skillsathi(
                 request.question,
                 top_k=request.top_k,
+                language=request.language,
             )
         return ChatResponse.model_validate(result)
 

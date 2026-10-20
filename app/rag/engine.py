@@ -355,7 +355,8 @@ def answer_with_evidence(
     evidence: list[dict],
     *,
     client,
-    model: str = "gemini-3.8-flash",
+    model: str = "gemini-3.5-flash-lite",
+    language: str = "ne",
 ) -> dict:
     """Generate an evidence-grounded answer with validated citation references."""
     import json
@@ -364,11 +365,15 @@ def answer_with_evidence(
     if not isinstance(question, str) or not question.strip():
         raise ValueError("Question must not be empty.")
 
+    if language not in ("ne", "en"):
+        raise ValueError("Unsupported language.")
+
     if not evidence:
         return {
             "answer": (
-                "Yo prasnako lagi SkillShikshya website bata "
-                "paryapta jaankari bhetiyena."
+                "I could not find enough information on the SkillShikshya website."
+                if language == "en"
+                else "यस प्रश्नबारे SkillShikshya वेबसाइटमा पर्याप्त जानकारी भेटिएन।"
             ),
             "citations": [],
         }
@@ -383,10 +388,15 @@ def answer_with_evidence(
         for index, item in enumerate(evidence, start=1)
     ]
 
+    response_language = (
+        "English" if language == "en"
+        else "Nepali in Devanagari script"
+    )
+
     instructions = (
         "You are SkillSathi AI, an educational assistant for SkillShikshya.\n"
         "Answer the student's question using ONLY the supplied website evidence.\n"
-        "Answer in clear, simple Romanized Nepali.\n"
+        f"Respond only in {response_language}. Do not switch languages based on the question text.\n"
         "Cite factual claims using numeric evidence markers, e.g. [1] or [1, 2].\n"
         "Use only the supplied marker numbers; do not invent references.\n"
         "Do not invent fees, schedules, course content, or job guarantees.\n"
@@ -450,11 +460,14 @@ def answer_with_evidence(
 
 
 
-def ask_skillsathi(question: str, *, top_k: int = 4) -> dict:
+def ask_skillsathi(
+    question: str, *, top_k: int = 4, language: str = "ne"
+) -> dict:
     """Retrieve website evidence and generate a cited Gemini answer."""
     import os
     from dotenv import load_dotenv
     from google import genai
+    from google.genai import types
 
     if not isinstance(question, str) or not question.strip():
         raise ValueError("Question must not be empty.")
@@ -466,14 +479,18 @@ def ask_skillsathi(question: str, *, top_k: int = 4) -> dict:
     ):
         raise ValueError("top_k must be an integer between 1 and 10.")
 
+    if language not in ("ne", "en"):
+        raise ValueError("Unsupported language.")
+
     question = question.strip()
     evidence = retrieve_evidence(question, limit=top_k)
 
     if not evidence:
         return {
             "answer": (
-                "Yo prasnako lagi SkillShikshya website bata "
-                "paryapta jaankari bhetiyena."
+                "I could not find enough information on the SkillShikshya website."
+                if language == "en"
+                else "यस प्रश्नबारे SkillShikshya वेबसाइटमा पर्याप्त जानकारी भेटिएन।"
             ),
             "citations": [],
             "retrieved_chunks": 0,
@@ -486,15 +503,22 @@ def ask_skillsathi(question: str, *, top_k: int = 4) -> dict:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not configured.")
 
-    model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+    model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(
+            timeout=45000,
+            retry_options=types.HttpRetryOptions(attempts=1),
+        ),
+    )
     try:
         result = answer_with_evidence(
             question,
             evidence,
             client=client,
             model=model,
+            language=language,
         )
     finally:
         client.close()

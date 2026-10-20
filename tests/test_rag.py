@@ -374,6 +374,7 @@ class TestAskSkillsathi(unittest.TestCase):
             evidence,
             client=client_class.return_value,
             model="gemini-3.8-flash",
+            language="ne",
         )
         client_class.return_value.close.assert_called_once()
         self.assertEqual(result["retrieved_chunks"], 1)
@@ -409,3 +410,54 @@ class TestAskSkillsathi(unittest.TestCase):
             with self.subTest(top_k=top_k):
                 with self.assertRaises(ValueError):
                     ask_skillsathi("Test question", top_k=top_k)
+
+
+class TestLanguageSelection(unittest.TestCase):
+
+    def test_english_answer_prompt(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        from app.rag.engine import answer_with_evidence
+
+        evidence = [{
+            "source_url": "https://skillshikshya.com/courses/python",
+            "section": "Curriculum",
+            "text": "Python basics.",
+        }]
+        client = MagicMock()
+        client.interactions.create.return_value = SimpleNamespace(
+            output_text="The course teaches Python basics. [1]"
+        )
+
+        result = answer_with_evidence(
+            "What does this course teach?",
+            evidence,
+            client=client,
+            language="en",
+        )
+
+        prompt = client.interactions.create.call_args.kwargs["input"]
+        self.assertIn("Respond only in English.", prompt)
+        self.assertEqual(len(result["citations"]), 1)
+
+    def test_english_fallback_without_evidence(self):
+        from unittest.mock import patch
+        from app.rag.engine import ask_skillsathi
+
+        with patch(
+            "app.rag.engine.retrieve_evidence",
+            return_value=[],
+        ):
+            result = ask_skillsathi(
+                "Unknown course?",
+                language="en",
+            )
+
+        self.assertIn("I could not find", result["answer"])
+        self.assertEqual(result["citations"], [])
+
+    def test_invalid_language_is_rejected(self):
+        from app.rag.engine import ask_skillsathi
+
+        with self.assertRaises(ValueError):
+            ask_skillsathi("Hello", language="fr")

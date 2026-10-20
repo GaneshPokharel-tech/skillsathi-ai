@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1da077">
+  <title>SkillSathi AI | SkillShikshya</title>
+  <style>
+    :root {
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --green: #1da077; --dark: #075a45; --ink: #17392e;
+      --muted: #61796e; --line: #dcece4; --pale: #e8f6f1;
+      color: var(--ink); background: #eef7f2;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; min-height: 100dvh; padding: 22px; }
+    button, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    button:focus-visible, textarea:focus-visible, a:focus-visible {
+      outline: 3px solid #a0d9c2; outline-offset: 3px;
+    }
+    .app {
+      width: min(1050px, 100%); height: min(850px, calc(100dvh - 44px));
+      min-height: 580px; margin: auto; background: #fff;
+      border: 1px solid var(--line); border-radius: 24px;
+      box-shadow: 0 20px 70px #09533b14; overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    .header {
+      padding: 20px 27px; color: #fff;
+      background: linear-gradient(115deg, #075a45, #1da077);
+      display: flex; align-items: center; gap: 13px;
+    }
+    .mark {
+      width: 46px; height: 46px; display: grid; place-items: center;
+      border-radius: 15px; background: #ffffff25;
+      border: 1px solid #ffffff55; font-size: 26px; font-weight: 800;
+    }
+    .identity { flex: 1; min-width: 0; }
+    .identity h1 { font-size: 21px; letter-spacing: -.6px; margin: 0 0 3px; }
+    .identity p { font-size: 12px; margin: 0; color: #d5faea; }
+    .language-switch {
+      background: #ffffff20; color: #fff; border: 1px solid #ffffff55;
+      border-radius: 22px; padding: 9px 13px; font-size: 12px; font-weight: 700;
+    }
+    .language-switch:hover { background: #ffffff35; }
+    .gate {
+      flex: 1; min-height: 0; overflow-y: auto; display: grid; place-items: center;
+      padding: 40px 20px;
+      background: radial-gradient(circle at 50% 8%, #d8f4e8 0, transparent 45%), #f9fcfa;
+    }
+    .gate-content { width: min(570px, 100%); text-align: center; }
+    .gate-icon, .intro-icon {
+      display: grid; place-items: center; margin: 0 auto 20px;
+      width: 64px; height: 64px; border-radius: 22px;
+      background: #daf2e7; color: var(--dark); font-size: 31px; font-weight: 750;
+    }
+    .eyebrow {
+      color: #168563; text-transform: uppercase; letter-spacing: 1.5px;
+      font-weight: 800; font-size: 11px; margin: 0 0 12px;
+    }
+    .gate h2 { font-size: clamp(25px, 4vw, 34px); letter-spacing: -1px; margin: 0 0 10px; }
+    .gate-description { color: var(--muted); line-height: 1.7; margin: 0 0 28px; font-size: 14px; }
+    .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .choice {
+      display: flex; align-items: center; text-align: left; gap: 14px;
+      padding: 20px; min-height: 104px; border: 1px solid #d5e9dd;
+      border-radius: 18px; background: #fff; color: var(--ink);
+      box-shadow: 0 7px 26px #0d5c3610; transition: .15s ease;
+    }
+    .choice:hover { border-color: var(--green); background: #f0fbf5; transform: translateY(-2px); }
+    .choice-icon {
+      display: grid; place-items: center; flex-shrink: 0;
+      width: 45px; height: 45px; border-radius: 13px;
+      background: var(--pale); color: var(--dark); font-size: 23px; font-weight: 750;
+    }
+    .choice strong { display: block; font-size: 17px; margin-bottom: 4px; }
+    .choice small { color: var(--muted); font-size: 12px; }
+    .gate-note { color: #83988d; font-size: 12px; margin: 20px 0 0; }
+    .chat-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .messages {
+      flex: 1; min-height: 0; overflow-y: auto; display: flex;
+      flex-direction: column; gap: 17px; padding: 26px;
+      background: linear-gradient(180deg, #f7fcf9, #fff 55%);
+    }
+    .intro { text-align: center; max-width: 460px; margin: auto; padding: 24px 0; }
+    .intro-icon { margin-bottom: 15px; }
+    .intro h2 { font-size: 26px; letter-spacing: -.8px; margin: 0 0 11px; }
+    .intro p { margin: 0; font-size: 14px; line-height: 1.8; color: var(--muted); }
+    .message { display: flex; gap: 10px; max-width: 90%; align-self: flex-start; }
+    .message.user { align-self: flex-end; flex-direction: row-reverse; }
+    .avatar {
+      display: grid; place-items: center; width: 34px; height: 34px;
+      border-radius: 12px; flex-shrink: 0;
+      background: #dcf3e8; color: var(--dark); font-size: 12px; font-weight: 800;
+    }
+    .user .avatar { background: #edf0f2; color: #53665d; }
+    .bubble {
+      background: #fff; border: 1px solid var(--line); border-radius: 5px 17px 17px;
+      padding: 13px 17px; max-width: 720px; font-size: 14px; line-height: 1.7;
+      overflow-wrap: anywhere; box-shadow: 0 3px 12px #0a53340a;
+    }
+    .user .bubble { background: var(--dark); border-color: var(--dark); color: #fff; border-radius: 17px 5px 17px 17px; }
+    .message-text { white-space: pre-wrap; }
+    .answer p { margin: 0 0 10px; }
+    .answer p:last-child, .answer ul:last-child { margin-bottom: 0; }
+    .answer ul { margin: 0 0 12px; padding-left: 19px; }
+    .answer li + li { margin-top: 5px; }
+    .sources { border-top: 1px solid var(--line); margin-top: 13px; padding-top: 11px; }
+    .sources-label { color: var(--muted); font-size: 11px; font-weight: 750; margin: 0 0 7px; }
+    .source-link {
+      display: block; width: fit-content; color: #087b59;
+      font-size: 12px; text-decoration: none; margin: 5px 0;
+    }
+    .source-link:hover { text-decoration: underline; }
+    .prompts { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 25px 16px; }
+    .prompt {
+      border: 1px solid #d4eadc; border-radius: 999px;
+      color: #146b50; background: #f3faf6; padding: 9px 13px; font-size: 12px;
+    }
+    .prompt:hover { background: #e5f5ec; border-color: var(--green); }
+    .composer { border-top: 1px solid var(--line); padding: 16px 24px 14px; }
+    .composer form { display: flex; gap: 11px; align-items: flex-end; }
+    textarea {
+      flex: 1; min-width: 0; resize: none; max-height: 140px;
+      padding: 13px 14px; border: 1px solid #cfdfd6; border-radius: 12px;
+      color: var(--ink); outline: none; font-size: 14px; line-height: 1.5;
+    }
+    textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px #1da07718; }
+    .send {
+      color: #fff; font-size: 14px; font-weight: 750;
+      background: var(--green); border: 0; padding: 14px 19px;
+      min-height: 48px; border-radius: 12px;
+    }
+    .send:hover { background: var(--dark); }
+    .notice { margin: 11px 0 0; color: #899a91; text-align: center; font-size: 11px; line-height: 1.5; }
+    @media (max-width: 650px) {
+      body { padding: 0; }
+      .app { width: 100%; height: 100dvh; min-height: 0; border: 0; border-radius: 0; }
+      .header { padding: 16px; }
+      .identity h1 { font-size: 19px; }
+      .gate { padding: 24px 15px; }
+      .choices { grid-template-columns: 1fr; }
+      .choice { min-height: 82px; padding: 15px; }
+      .messages { padding: 17px 13px; }
+      .message { max-width: 96%; }
+      .prompts { padding: 0 13px 12px; }
+      .composer { padding: 12px 13px; }
+      .send { padding: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="mark" aria-hidden="true">S</div>
+      <div class="identity">
+        <h1>SkillSathi AI</h1>
+        <p id="subtitle">Your SkillShikshya learning companion</p>
+      </div>
+      <button id="change-language" class="language-switch" type="button" hidden>Change language</button>
+    </header>
+
+    <section class="gate" id="language-gate" aria-labelledby="language-title">
+      <div class="gate-content">
+        <div class="gate-icon" aria-hidden="true">अ / A</div>
+        <p class="eyebrow">Welcome to SkillSathi AI</p>
+        <h2 id="language-title">Choose your language</h2>
+        <p class="gate-description">तपाईं कुन भाषामा कुरा गर्न चाहनुहुन्छ?<br>How would you like SkillSathi AI to respond?</p>
+        <div class="choices">
+          <button type="button" class="choice" data-language="ne">
+            <span class="choice-icon" aria-hidden="true">ने</span>
+            <span><strong>नेपाली</strong><small>Nepali · देवनागरी</small></span>
+          </button>
+          <button type="button" class="choice" data-language="en">
+            <span class="choice-icon" aria-hidden="true">EN</span>
+            <span><strong>English</strong><small>Continue in English</small></span>
+          </button>
+        </div>
+        <p class="gate-note">You can change the language anytime.</p>
+      </div>
+    </section>
+
+    <section class="chat-view" id="chat-view" hidden aria-label="SkillSathi chat">
+      <main id="conversation" class="messages" role="log" aria-live="polite" aria-relevant="additions">
+        <div class="intro" id="intro">
+          <div class="intro-icon" aria-hidden="true">✦</div>
+          <p class="eyebrow">SKILLSATHI AI</p>
+          <h2 id="intro-title"></h2>
+          <p id="intro-description"></p>
+        </div>
+      </main>
+      <div class="prompts" aria-label="Suggested questions">
+        <button type="button" class="prompt" data-prompt="cyber"></button>
+        <button type="button" class="prompt" data-prompt="revit"></button>
+        <button type="button" class="prompt" data-prompt="analytics"></button>
+      </div>
+      <div class="composer">
+        <form id="chat-form">
+          <textarea id="question" rows="1" maxlength="2000" required aria-label="Your question"></textarea>
+          <button id="send" class="send" type="submit"></button>
+        </form>
+        <p class="notice" id="notice"></p>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    "use strict";
+    const gate = document.getElementById("language-gate");
+    const chatView = document.getElementById("chat-view");
+    const switchButton = document.getElementById("change-language");
+    const conversation = document.getElementById("conversation");
+    const intro = document.getElementById("intro");
+    const form = document.getElementById("chat-form");
+    const input = document.getElementById("question");
+    const send = document.getElementById("send");
+    const suggestions = [...document.querySelectorAll("[data-prompt]")];
+    const languageButtons = [...document.querySelectorAll("[data-language]")];
+    let selectedLanguage = null;
+    let busy = false;
+
+    const strings = {
+      ne: {
+        subtitle: "SkillShikshya को सिकाइ साथी",
+        change: "भाषा बदल्नुहोस्",
+        title: "नमस्ते! म SkillSathi AI हुँ।",
+        description: "SkillShikshya का कोर्स, सीप र पाठ्यक्रमबारे सोध्नुहोस्। वेबसाइटमा उपलब्ध जानकारीका आधारमा स्रोतसहित जवाफ दिनेछु।",
+        placeholder: "कोर्स वा सीपबारे प्रश्न लेख्नुहोस्...",
+        send: "पठाउनुहोस्",
+        wait: "जानकारी खोज्दैछु...",
+        sources: "वेबसाइटका स्रोतहरू",
+        note: "AI का उत्तरमा त्रुटि हुन सक्छ। महत्त्वपूर्ण विवरण SkillShikshya सँग पुष्टि गर्नुहोस्। प्रत्येक प्रश्नको छुट्टै उत्तर दिइन्छ।",
+        error: "अहिले उत्तर दिन सकिएन। कृपया फेरि प्रयास गर्नुहोस्।",
+        timeout: "समय सीमा सकियो। कृपया फेरि प्रयास गर्नुहोस्।",
+        changed: "भाषा नेपालीमा परिवर्तन भयो। अबका उत्तर नेपालीमा आउनेछन्।"
+      },
+      en: {
+        subtitle: "Your SkillShikshya learning companion",
+        change: "Change language",
+        title: "Hi! I'm SkillSathi AI.",
+        description: "Ask about SkillShikshya courses, skills, and curricula. I'll answer using available website information and show the sources.",
+        placeholder: "Ask about courses, skills, or curricula...",
+        send: "Send",
+        wait: "Looking up website information...",
+        sources: "Website sources",
+        note: "AI answers can be inaccurate. Verify important details with SkillShikshya. Each question is answered independently.",
+        error: "I couldn't generate an answer right now. Please try again.",
+        timeout: "The request timed out. Please try again.",
+        changed: "Language switched to English. Future replies will be in English."
+      }
+    };
+    const prompts = {
+      cyber: {
+        ne: ["साइबर सुरक्षा कोर्स", "Cybersecurity Job Ready Program मा कुन सीपहरू सिकाइन्छ?"],
+        en: ["Cybersecurity skills", "What skills are taught in the Cybersecurity Job Ready Program?"]
+      },
+      revit: {
+        ne: ["Revit BIM पाठ्यक्रम", "Autodesk Revit BIM कोर्समा के सिकाइन्छ?"],
+        en: ["Revit BIM curriculum", "What will I learn in the Autodesk Revit BIM course?"]
+      },
+      analytics: {
+        ne: ["Data Analytics कोर्स", "Business Data Analytics कोर्समा के-के समावेश छन्?"],
+        en: ["Data Analytics course", "What does the Business Data Analytics course cover?"]
+      }
+    };
+
+    function activateLanguage(language) {
+      if (busy || !strings[language]) return;
+      const changing = selectedLanguage !== null && selectedLanguage !== language;
+      selectedLanguage = language;
+      document.documentElement.lang = language;
+      const t = strings[language];
+      document.getElementById("subtitle").textContent = t.subtitle;
+      switchButton.textContent = t.change;
+      document.getElementById("intro-title").textContent = t.title;
+      document.getElementById("intro-description").textContent = t.description;
+      input.placeholder = t.placeholder;
+      send.textContent = t.send;
+      document.getElementById("notice").textContent = t.note;
+      suggestions.forEach(button => {
+        button.textContent = prompts[button.dataset.prompt][language][0];
+      });
+      gate.hidden = true;
+      chatView.hidden = false;
+      switchButton.hidden = false;
+      if (changing) appendMessage("assistant", t.changed);
+      input.focus();
+    }
+
+    function addInline(parent, value) {
+      for (const token of value.split(/(\*\*[^*]+\*\*)/g)) {
+        if (token.startsWith("**") && token.endsWith("**")) {
+          const strong = document.createElement("strong");
+          strong.textContent = token.slice(2, -2);
+          parent.appendChild(strong);
+        } else {
+          parent.appendChild(document.createTextNode(token));
+        }
+      }
+    }
+
+    function formatAnswer(container, answer) {
+      let list = null;
+      for (const line of answer.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) { list = null; continue; }
+        if (/^[-*] /.test(trimmed)) {
+          if (!list) {
+            list = document.createElement("ul");
+            container.appendChild(list);
+          }
+          const item = document.createElement("li");
+          addInline(item, trimmed.slice(2));
+          list.appendChild(item);
+        } else {
+          list = null;
+          const paragraph = document.createElement("p");
+          addInline(paragraph, trimmed);
+          container.appendChild(paragraph);
+        }
+      }
+    }
+
+    function appendMessage(role, message, citations = [], formatted = false) {
+      intro.hidden = true;
+      const article = document.createElement("article");
+      article.className = "message " + role;
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.setAttribute("aria-hidden", "true");
+      avatar.textContent = role === "user" ? "You" : "S";
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      const body = document.createElement("div");
+      body.className = formatted ? "answer" : "message-text";
+      if (formatted) formatAnswer(body, message);
+      else body.textContent = message;
+      bubble.appendChild(body);
+
+      if (Array.isArray(citations) && citations.length) {
+        const sources = document.createElement("div");
+        sources.className = "sources";
+        const title = document.createElement("p");
+        title.className = "sources-label";
+        title.textContent = strings[selectedLanguage].sources;
+        sources.appendChild(title);
+        for (const citation of citations) {
+          try {
+            const url = new URL(citation.source_url);
+            if (url.protocol !== "https:" || !["skillshikshya.com", "www.skillshikshya.com"].includes(url.hostname)) continue;
+            const link = document.createElement("a");
+            link.className = "source-link";
+            link.href = url.href;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = citation.marker + "  " + (citation.section || "Source page") + " ↗";
+            sources.appendChild(link);
+          } catch { /* malformed URLs are not shown */ }
+        }
+        if (sources.querySelector("a")) bubble.appendChild(sources);
+      }
+      article.append(avatar, bubble);
+      conversation.appendChild(article);
+      conversation.scrollTop = conversation.scrollHeight;
+      return article;
+    }
+
+    function setBusy(value) {
+      busy = value;
+      send.disabled = value;
+      input.disabled = value;
+      switchButton.disabled = value;
+      suggestions.forEach(button => { button.disabled = value; });
+      send.textContent = value ? "…" : strings[selectedLanguage].send;
+    }
+
+    async function askQuestion(question) {
+      if (busy || !selectedLanguage || !question || question.length > 2000) return;
+      appendMessage("user", question);
+      input.value = "";
+      input.style.height = "auto";
+      setBusy(true);
+      const languageForRequest = selectedLanguage;
+      const pending = appendMessage("assistant", strings[languageForRequest].wait);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 120000);
+      try {
+        const response = await fetch("/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question, top_k: 4, language: selectedLanguage }),
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const data = await response.json();
+        if (typeof data.answer !== "string" || !data.answer.trim()) throw new Error("Empty answer");
+        pending.remove();
+        appendMessage("assistant", data.answer, data.citations, true);
+      } catch (error) {
+        pending.remove();
+        appendMessage("assistant", error.name === "AbortError" ? strings[languageForRequest].timeout : strings[languageForRequest].error);
+      } finally {
+        clearTimeout(timer);
+        setBusy(false);
+        input.focus();
+      }
+    }
+
+    languageButtons.forEach(button => {
+      button.addEventListener("click", () => activateLanguage(button.dataset.language));
+    });
+    switchButton.addEventListener("click", () => {
+      if (busy) return;
+      chatView.hidden = true;
+      gate.hidden = false;
+      languageButtons.find(button => button.dataset.language === selectedLanguage).focus();
+    });
+    suggestions.forEach(button => {
+      button.addEventListener("click", () => askQuestion(prompts[button.dataset.prompt][selectedLanguage][1]));
+    });
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      askQuestion(input.value.trim());
+    });
+    input.addEventListener("keydown", event => {
+      if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    input.addEventListener("input", () => {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 140) + "px";
+    });
+  </script>
+</body>
+</html>

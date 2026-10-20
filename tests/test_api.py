@@ -48,6 +48,7 @@ class TestChatAPI(unittest.TestCase):
         mocked_chat.assert_called_once_with(
             "What is Revit BIM?",
             top_k=3,
+            language="ne",
         )
 
     def test_invalid_requests_are_rejected(self):
@@ -122,8 +123,62 @@ class TestChatAPI(unittest.TestCase):
         mocked_chat.assert_called_once_with(
             "Unknown course?",
             top_k=4,
+            language="ne",
         )
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestChatPage(unittest.TestCase):
+
+    def test_chat_page_is_served_at_root(self):
+        response = client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/html", response.headers["content-type"])
+        self.assertIn("SkillSathi AI", response.text)
+        self.assertIn('fetch("/chat"', response.text)
+
+    def test_swagger_docs_remain_available(self):
+        response = client.get("/docs")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("swagger-ui", response.text)
+
+
+class TestChatLanguageAPI(unittest.TestCase):
+
+    def test_english_selection_reaches_chatbot(self):
+        expected = {
+            "answer": "Python basics are covered. [1]",
+            "citations": [],
+            "retrieved_chunks": 1,
+        }
+
+        with patch(
+            "app.api.server.ask_skillsathi",
+            return_value=expected,
+        ) as mocked:
+            response = client.post(
+                "/chat",
+                json={
+                    "question": "What is taught?",
+                    "language": "en",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mocked.assert_called_once_with(
+            "What is taught?",
+            top_k=4,
+            language="en",
+        )
+
+    def test_unsupported_language_returns_422(self):
+        response = client.post(
+            "/chat",
+            json={"question": "Hello", "language": "fr"},
+        )
+        self.assertEqual(response.status_code, 422)
