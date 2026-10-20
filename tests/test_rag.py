@@ -322,3 +322,90 @@ class TestGroundedAnswerGeneration(unittest.TestCase):
         self.assertEqual(result["citations"], [])
         self.assertTrue(result["answer"])
         client.interactions.create.assert_not_called()
+
+
+class TestAskSkillsathi(unittest.TestCase):
+
+    def test_retrieval_and_generation_are_connected(self):
+        import os
+        from unittest.mock import patch
+        from app.rag.engine import ask_skillsathi
+
+        evidence = [{
+            "source_url": "https://example.org/courses/python",
+            "section": "Curriculum",
+            "text": "Python programming basics.",
+        }]
+
+        expected = {
+            "answer": "Python basics sikainchha. [1]",
+            "citations": [{
+                "marker": "[1]",
+                "source_url": "https://example.org/courses/python",
+                "section": "Curriculum",
+            }],
+        }
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GEMINI_API_KEY": "test-key",
+                    "GEMINI_MODEL": "gemini-3.8-flash",
+                },
+            ),
+            patch(
+                "app.rag.engine.retrieve_evidence",
+                return_value=evidence,
+            ) as retrieve,
+            patch(
+                "app.rag.engine.answer_with_evidence",
+                return_value=expected,
+            ) as generate,
+            patch("google.genai.Client") as client_class,
+        ):
+            result = ask_skillsathi("What is taught?", top_k=3)
+
+        retrieve.assert_called_once_with(
+            "What is taught?", limit=3
+        )
+        generate.assert_called_once_with(
+            "What is taught?",
+            evidence,
+            client=client_class.return_value,
+            model="gemini-3.8-flash",
+        )
+        client_class.return_value.close.assert_called_once()
+        self.assertEqual(result["retrieved_chunks"], 1)
+        self.assertEqual(result["answer"], expected["answer"])
+
+    def test_no_evidence_skips_gemini(self):
+        from unittest.mock import patch
+        from app.rag.engine import ask_skillsathi
+
+        with (
+            patch(
+                "app.rag.engine.retrieve_evidence",
+                return_value=[],
+            ),
+            patch("google.genai.Client") as client_class,
+        ):
+            result = ask_skillsathi("Unknown course?")
+
+        self.assertEqual(result["retrieved_chunks"], 0)
+        self.assertEqual(result["citations"], [])
+        self.assertTrue(result["answer"])
+        client_class.assert_not_called()
+
+    def test_rejects_invalid_questions_and_limits(self):
+        from app.rag.engine import ask_skillsathi
+
+        for question in ("", "   "):
+            with self.subTest(question=question):
+                with self.assertRaises(ValueError):
+                    ask_skillsathi(question)
+
+        for top_k in (0, 11, True, 2.5):
+            with self.subTest(top_k=top_k):
+                with self.assertRaises(ValueError):
+                    ask_skillsathi("Test question", top_k=top_k)

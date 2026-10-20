@@ -448,6 +448,63 @@ def answer_with_evidence(
     }
 
 
+
+
+def ask_skillsathi(question: str, *, top_k: int = 4) -> dict:
+    """Retrieve website evidence and generate a cited Gemini answer."""
+    import os
+    from dotenv import load_dotenv
+    from google import genai
+
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError("Question must not be empty.")
+
+    if (
+        isinstance(top_k, bool)
+        or not isinstance(top_k, int)
+        or not 1 <= top_k <= 10
+    ):
+        raise ValueError("top_k must be an integer between 1 and 10.")
+
+    question = question.strip()
+    evidence = retrieve_evidence(question, limit=top_k)
+
+    if not evidence:
+        return {
+            "answer": (
+                "Yo prasnako lagi SkillShikshya website bata "
+                "paryapta jaankari bhetiyena."
+            ),
+            "citations": [],
+            "retrieved_chunks": 0,
+        }
+
+    project_root = Path(__file__).resolve().parents[2]
+    load_dotenv(dotenv_path=project_root / ".env")
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not configured.")
+
+    model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+
+    client = genai.Client(api_key=api_key)
+    try:
+        result = answer_with_evidence(
+            question,
+            evidence,
+            client=client,
+            model=model,
+        )
+    finally:
+        client.close()
+
+    return {
+        **result,
+        "retrieved_chunks": len(evidence),
+    }
+
+
 def main() -> None:
     import argparse
 
