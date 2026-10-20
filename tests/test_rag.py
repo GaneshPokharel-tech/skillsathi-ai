@@ -240,3 +240,85 @@ class TestRAGRetrievalInterface(unittest.TestCase):
         self.assertIn(source, printed)
         self.assertIn("Skills You Will Learn", printed)
         self.assertIn("Network security", printed)
+
+
+class TestGroundedAnswerGeneration(unittest.TestCase):
+
+    def test_returns_only_cited_sources(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        from app.rag.engine import answer_with_evidence
+
+        evidence = [
+            {
+                "source_url": "https://example.org/courses/python",
+                "section": "Syllabus",
+                "text": "Python basics and web development.",
+            },
+            {
+                "source_url": "https://example.org/courses/design",
+                "section": "Overview",
+                "text": "Graphic design fundamentals.",
+            },
+        ]
+
+        client = MagicMock()
+        client.interactions.create.return_value = SimpleNamespace(
+            output_text="Python basics sikaincha. [1]"
+        )
+
+        result = answer_with_evidence(
+            "What does the Python course teach?",
+            evidence,
+            client=client,
+            model="gemini-3.8-flash",
+        )
+
+        self.assertIn("[1]", result["answer"])
+        self.assertEqual(len(result["citations"]), 1)
+        self.assertEqual(
+            result["citations"][0]["source_url"],
+            "https://example.org/courses/python",
+        )
+        client.interactions.create.assert_called_once()
+
+    def test_rejects_invented_citation_marker(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+        from app.rag.engine import answer_with_evidence
+
+        evidence = [{
+            "source_url": "https://example.org/courses/python",
+            "section": "Syllabus",
+            "text": "Learn Python basics.",
+        }]
+
+        client = MagicMock()
+        client.interactions.create.return_value = SimpleNamespace(
+            output_text="Python sikaincha. [9]"
+        )
+
+        with self.assertRaises(ValueError):
+            answer_with_evidence(
+                "What is taught?",
+                evidence,
+                client=client,
+                model="gemini-3.8-flash",
+            )
+
+    def test_no_evidence_skips_llm_call(self):
+        from unittest.mock import MagicMock
+        from app.rag.engine import answer_with_evidence
+
+        client = MagicMock()
+
+        result = answer_with_evidence(
+            "What is the course fee?",
+            [],
+            client=client,
+            model="gemini-3.8-flash",
+        )
+
+        self.assertEqual(result["citations"], [])
+        self.assertTrue(result["answer"])
+        client.interactions.create.assert_not_called()
