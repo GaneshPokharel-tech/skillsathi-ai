@@ -104,6 +104,40 @@
     }
     .user .bubble { background: var(--dark); border-color: var(--dark); color: #fff; border-radius: 17px 5px 17px 17px; }
     .message-text { white-space: pre-wrap; }
+    .answer h2,
+    .answer h3,
+    .answer h4 {
+      color: #164c3b;
+      font-weight: 750;
+      line-height: 1.4;
+      margin: 20px 0 9px;
+    }
+
+    .answer h2:first-child,
+    .answer h3:first-child,
+    .answer h4:first-child {
+      margin-top: 0;
+    }
+
+    .answer h2 { font-size: 18px; }
+    .answer h3 { font-size: 15px; }
+    .answer h4 { font-size: 14px; }
+
+    .answer ol {
+      margin: 0 0 12px;
+      padding-left: 22px;
+    }
+
+    .answer ol:last-child {
+      margin-bottom: 0;
+    }
+
+    .answer hr {
+      border: 0;
+      border-top: 1px solid #dcece4;
+      margin: 16px 0;
+    }
+
     .answer p { margin: 0 0 10px; }
     .answer p:last-child, .answer ul:last-child { margin-bottom: 0; }
     .answer ul { margin: 0 0 12px; padding-left: 19px; }
@@ -150,10 +184,448 @@
       .composer { padding: 12px 13px; }
       .send { padding: 13px; }
     }
+
+    /* SkillShikshya branded application layout */
+    .app {
+      width: min(1440px, 100%);
+      height: min(900px, calc(100dvh - 44px));
+      display: grid;
+      grid-template-columns: 268px minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr);
+    }
+
+    .brand-sidebar {
+      grid-column: 1;
+      grid-row: 1 / 3;
+      position: relative;
+      isolation: isolate;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      min-height: 0;
+      overflow: hidden;
+      padding: 34px 24px 23px;
+      color: #fff;
+      background: linear-gradient(
+        170deg,
+        #064e3d 0%,
+        #086249 53%,
+        #0d8160 100%
+      );
+    }
+
+    .brand-sidebar::before {
+      content: "";
+      position: absolute;
+      inset: -110px -140px auto auto;
+      width: 340px;
+      height: 340px;
+      background: radial-gradient(
+        circle,
+        #45c69a35 0%,
+        transparent 68%
+      );
+      pointer-events: none;
+    }
+
+    .brand-sidebar > * {
+      position: relative;
+      z-index: 1;
+    }
+
+    .sidebar-brand {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      width: fit-content;
+      color: #fff;
+      text-decoration: none;
+    }
+
+    .sidebar-brand-name {
+      font-size: 25px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      line-height: 1.2;
+    }
+
+    .sidebar-brand-caption {
+      color: #bdebd9;
+      font-size: 11px;
+      font-weight: 550;
+    }
+
+    .sidebar-brand:hover .sidebar-brand-caption {
+      color: #fff;
+      text-decoration: underline;
+    }
+
+    .sidebar-content {
+      margin-top: 54px;
+    }
+
+    .sidebar-eyebrow {
+      margin: 0 0 14px;
+      color: #94e4bf;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+    }
+
+    .sidebar-content h2 {
+      font-size: 29px;
+      line-height: 1.18;
+      letter-spacing: -1.1px;
+      margin: 0 0 16px;
+    }
+
+    .sidebar-description {
+      color: #d4f0e4;
+      font-size: 13px;
+      line-height: 1.85;
+      margin: 0;
+    }
+
+    .sidebar-features {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-top: 35px;
+    }
+
+    .sidebar-feature {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      color: #e6fff3;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .feature-icon {
+      display: grid;
+      place-items: center;
+      flex: 0 0 37px;
+      height: 37px;
+      border: 1px solid #ffffff35;
+      border-radius: 11px;
+      background: #ffffff17;
+      color: #c6f4df;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .sidebar-landscape {
+      flex: 1;
+      min-height: 65px;
+      margin: 8px -24px -24px;
+      align-self: stretch;
+      opacity: .75;
+      background: linear-gradient(
+        170deg,
+        transparent 0%,
+        #20a17738 55%,
+        #003d36aa 100%
+      );
+    }
+
+    .sidebar-landscape::after {
+      content: "";
+      position: absolute;
+      inset: 20% 0 0;
+      background: #044c40aa;
+      clip-path: polygon(
+        0 52%, 13% 30%, 27% 49%, 45% 12%,
+        60% 38%, 74% 18%, 100% 58%,
+        100% 100%, 0 100%
+      );
+    }
+
+    .sidebar-footer {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: #ddf8ea;
+      font-size: 11px;
+    }
+
+    .sidebar-status {
+      width: 8px;
+      height: 8px;
+      background: #9bedc2;
+      border-radius: 50%;
+    }
+
+    .header {
+      grid-column: 2;
+      grid-row: 1;
+      min-width: 0;
+    }
+
+    .gate,
+    .chat-view {
+      grid-column: 2;
+      grid-row: 2;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    /* Polished language selection */
+    .gate {
+      position: relative;
+      isolation: isolate;
+      background:
+        radial-gradient(
+          ellipse at 50% 37%,
+          #dff7ec 0%,
+          transparent 63%
+        ),
+        #fbfefd;
+    }
+
+    .gate::before,
+    .gate::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+    }
+
+    .gate::before {
+      height: 22%;
+      background: #d6f1e7;
+      clip-path: polygon(
+        0 64%, 14% 30%, 30% 67%, 44% 17%,
+        58% 62%, 74% 26%, 100% 71%,
+        100% 100%, 0 100%
+      );
+    }
+
+    .gate::after {
+      height: 13%;
+      background: #a4ddc8;
+      opacity: .55;
+      clip-path: polygon(
+        0 52%, 14% 76%, 32% 24%, 49% 58%,
+        66% 18%, 83% 61%, 100% 27%,
+        100% 100%, 0 100%
+      );
+    }
+
+    .gate-content {
+      position: relative;
+      z-index: 1;
+      width: min(760px, 100%);
+      padding: 30px 0 55px;
+    }
+
+    .gate h2 {
+      font-size: clamp(29px, 4vw, 43px);
+      letter-spacing: -1.7px;
+    }
+
+    .gate-description {
+      font-size: 15px;
+      line-height: 1.9;
+      margin-bottom: 34px;
+    }
+
+    .choices {
+      gap: 17px;
+    }
+
+    .choice {
+      min-height: 114px;
+      gap: 16px;
+      padding: 20px 22px;
+      border-radius: 21px;
+      box-shadow: 0 12px 35px #155e3d0d;
+    }
+
+    .choice-label {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .choice-arrow {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      flex-shrink: 0;
+      border-radius: 50%;
+      background: #edf8f2;
+      color: var(--dark);
+      font-weight: 800;
+    }
+
+    .choice:hover .choice-arrow {
+      background: #d0efdf;
+    }
+
+    .chat-view {
+      background: #fff;
+    }
+
+    .message {
+      max-width: 95%;
+    }
+
+    .bubble {
+      max-width: 840px;
+    }
+
+    @media (max-width: 840px) {
+      .brand-sidebar {
+        display: none;
+      }
+
+      .app {
+        grid-template-columns: minmax(0, 1fr);
+      }
+
+      .header,
+      .gate,
+      .chat-view {
+        grid-column: 1;
+      }
+    }
+
+    @media (max-width: 650px) {
+      .app {
+        width: 100%;
+        height: 100dvh;
+        min-height: 0;
+        border: 0;
+        border-radius: 0;
+      }
+
+      .gate-content {
+        padding: 18px 0 45px;
+      }
+
+      .gate h2 {
+        letter-spacing: -1px;
+      }
+
+      .choice {
+        min-height: 86px;
+        padding: 14px;
+      }
+
+      .choice-arrow {
+        width: 28px;
+        height: 28px;
+      }
+    }
+
+
+    .sidebar-footer-text {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .sidebar-credit {
+      color: #bdebd9;
+      font-size: 11px;
+    }
+
+    .gate-icon {
+      white-space: nowrap;
+      font-size: 21px;
+      letter-spacing: -0.5px;
+    }
+
+
+    .sidebar-brand-lockup {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+    }
+
+    .sidebar-brand-logo {
+      display: block;
+      width: 46px;
+      height: 46px;
+      flex-shrink: 0;
+      object-fit: contain;
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    .sidebar-brand-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .sidebar-brand-copy .sidebar-brand-name {
+      font-size: 20px;
+      letter-spacing: -.6px;
+    }
+
   </style>
 </head>
 <body>
   <div class="app">
+    <aside class="brand-sidebar" aria-label="SkillShikshya information">
+      <a
+        class="sidebar-brand"
+        href="https://skillshikshya.com/"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Visit the SkillShikshya website"
+      >
+        <span class="sidebar-brand-lockup">
+          <img
+            class="sidebar-brand-logo"
+            src="/brand-icon"
+            alt=""
+            width="46"
+            height="46"
+          >
+          <span class="sidebar-brand-copy">
+            <span class="sidebar-brand-name">SkillShikshya</span>
+            <span class="sidebar-brand-caption">Official website ↗</span>
+          </span>
+        </span>
+      </a>
+
+      <div class="sidebar-content">
+        <p class="sidebar-eyebrow">YOUR LEARNING JOURNEY</p>
+        <h2>Learn today.<br>Build tomorrow.</h2>
+        <p class="sidebar-description">
+          Explore practical skills, compare courses,
+          and make informed learning decisions.
+        </p>
+
+        <div class="sidebar-features">
+          <div class="sidebar-feature">
+            <span class="feature-icon" aria-hidden="true">01</span>
+            <span>Explore available courses</span>
+          </div>
+          <div class="sidebar-feature">
+            <span class="feature-icon" aria-hidden="true">02</span>
+            <span>Compare learning paths</span>
+          </div>
+          <div class="sidebar-feature">
+            <span class="feature-icon" aria-hidden="true">03</span>
+            <span>Discover relevant skills</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-landscape" aria-hidden="true"></div>
+
+      <div class="sidebar-footer">
+        <span class="sidebar-credit">Made by Ganesh Pokharel</span>
+      </div>
+    </aside>
+
     <header class="header">
       <div class="mark" aria-hidden="true">S</div>
       <div class="identity">
@@ -172,11 +644,13 @@
         <div class="choices">
           <button type="button" class="choice" data-language="ne">
             <span class="choice-icon" aria-hidden="true">ने</span>
-            <span><strong>नेपाली</strong><small>Nepali · देवनागरी</small></span>
+            <span class="choice-label"><strong>नेपाली</strong><small>Nepali · देवनागरी</small></span>
+            <span class="choice-arrow" aria-hidden="true">→</span>
           </button>
           <button type="button" class="choice" data-language="en">
             <span class="choice-icon" aria-hidden="true">EN</span>
-            <span><strong>English</strong><small>Continue in English</small></span>
+            <span class="choice-label"><strong>English</strong><small>Continue in English</small></span>
+            <span class="choice-arrow" aria-hidden="true">→</span>
           </button>
         </div>
         <p class="gate-note">You can change the language anytime.</p>
@@ -293,6 +767,7 @@
 
     function addInline(parent, value) {
       for (const token of value.split(/(\*\*[^*]+\*\*)/g)) {
+        if (!token) continue;
         if (token.startsWith("**") && token.endsWith("**")) {
           const strong = document.createElement("strong");
           strong.textContent = token.slice(2, -2);
@@ -305,25 +780,62 @@
 
     function formatAnswer(container, answer) {
       let list = null;
+
       for (const line of answer.split("\n")) {
         const trimmed = line.trim();
-        if (!trimmed) { list = null; continue; }
-        if (/^[-*] /.test(trimmed)) {
-          if (!list) {
-            list = document.createElement("ul");
+
+        if (!trimmed) {
+          list = null;
+          continue;
+        }
+
+        // Markdown headings: #, ##, ### and ####.
+        const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+
+        if (heading) {
+          list = null;
+
+          const level = Math.max(2, heading[1].length);
+          const title = document.createElement("h" + level);
+
+          addInline(title, heading[2]);
+          container.appendChild(title);
+          continue;
+        }
+
+        // Markdown horizontal divider.
+        if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+          list = null;
+          container.appendChild(document.createElement("hr"));
+          continue;
+        }
+
+        // Unordered and ordered Markdown lists.
+        const bullet = trimmed.match(/^[-*+]\s+(.+)$/);
+        const numbered = trimmed.match(/^\d{1,2}[.)]\s+(.+)$/);
+
+        if (bullet || numbered) {
+          const type = bullet ? "ul" : "ol";
+
+          if (!list || list.tagName.toLowerCase() !== type) {
+            list = document.createElement(type);
             container.appendChild(list);
           }
+
           const item = document.createElement("li");
-          addInline(item, trimmed.slice(2));
+          addInline(item, (bullet || numbered)[1]);
           list.appendChild(item);
-        } else {
-          list = null;
-          const paragraph = document.createElement("p");
-          addInline(paragraph, trimmed);
-          container.appendChild(paragraph);
+          continue;
         }
+
+        list = null;
+
+        const paragraph = document.createElement("p");
+        addInline(paragraph, trimmed);
+        container.appendChild(paragraph);
       }
     }
+
 
     function appendMessage(role, message, citations = [], formatted = false) {
       intro.hidden = true;

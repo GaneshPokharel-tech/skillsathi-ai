@@ -55,6 +55,15 @@ class ChatResponse(BaseModel):
     pending_course_urls: list[str] | None = None
 
 
+@app.get("/brand-icon", include_in_schema=False)
+def brand_icon() -> FileResponse:
+    """Serve the locally stored SkillShikshya site icon."""
+    return FileResponse(
+        Path(__file__).with_name("skillshikshya-icon.png"),
+        media_type="image/png",
+    )
+
+
 @app.get("/", include_in_schema=False)
 def chat_page() -> FileResponse:
     """Serve the same-origin student chat interface."""
