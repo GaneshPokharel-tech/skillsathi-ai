@@ -327,3 +327,261 @@ class TestAgentExecution(unittest.TestCase):
                         execute_question("Hello", top_k=top_k)
 
         catalog_tool.assert_not_called()
+
+
+class TestAgentAnswerService(unittest.TestCase):
+
+    def setUp(self):
+        self.url = (
+            "https://skillshikshya.com/courses/"
+            "autodesk-revit-bim-course"
+        )
+        self.evidence = [{
+            "source_url": self.url,
+            "section": "Curriculum",
+            "text": "BIM fundamentals and architectural modeling.",
+        }]
+
+    def test_course_listing_skips_gemini(self):
+        from unittest.mock import patch
+        from app.agent.service import ask_agent
+
+        plan = {
+            "tool": "list_courses",
+            "data": {
+                "courses": [{
+                    "title": "Autodesk Revit",
+                    "source_url": self.url,
+                }],
+            },
+        }
+
+        with (
+            patch(
+                "app.agent.service.execute_question",
+                return_value=plan,
+            ),
+            patch(
+                "app.agent.service.answer_with_evidence",
+            ) as generate,
+        ):
+            result = ask_agent("List courses", language="en")
+
+        self.assertIn("Autodesk Revit", result["answer"])
+        self.assertEqual(len(result["citations"]), 1)
+        self.assertEqual(result["retrieved_chunks"], 0)
+        generate.assert_not_called()
+
+    def test_clarification_skips_gemini(self):
+        from unittest.mock import patch
+        from app.agent.service import ask_agent
+
+        plan = {
+            "tool": "clarify",
+            "data": {
+                "matched_courses": [{
+                    "title": "Autodesk Revit",
+                    "source_url": self.url,
+                }],
+            },
+        }
+
+        with (
+            patch(
+                "app.agent.service.execute_question",
+                return_value=plan,
+            ),
+            patch(
+                "app.agent.service.answer_with_evidence",
+            ) as generate,
+        ):
+            result = ask_agent("Which one?", language="ne")
+
+        self.assertIn("कुन कोर्स", result["answer"])
+        self.assertEqual(len(result["citations"]), 1)
+        generate.assert_not_called()
+
+    def test_details_pass_exact_course_evidence(self):
+        from unittest.mock import patch
+        from app.agent.service import ask_agent
+
+        plan = {
+            "tool": "get_course_details",
+            "data": {
+                "found": True,
+                "course": {
+                    "evidence": self.evidence,
+                    "truncated": False,
+                },
+            },
+        }
+        expected = {
+            "answer": "Revit teaches BIM. [1]",
+            "citations": [{
+                "marker": "[1]",
+                "section": "Curriculum",
+                "source_url": self.url,
+            }],
+        }
+        fake_client = object()
+
+        with (
+            patch(
+                "app.agent.service.execute_question",
+                return_value=plan,
+            ),
+            patch(
+                "app.agent.service.answer_with_evidence",
+                return_value=expected,
+            ) as generate,
+        ):
+            result = ask_agent(
+                "Tell me about Revit",
+                language="en",
+                client=fake_client,
+            )
+
+        self.assertEqual(result["retrieved_chunks"], 1)
+        self.assertEqual(result["citations"], expected["citations"])
+        self.assertEqual(
+            generate.call_args.args[1],
+            self.evidence,
+        )
+        self.assertIs(
+            generate.call_args.kwargs["client"],
+            fake_client,
+        )
+        self.assertEqual(
+            generate.call_args.kwargs["language"],
+            "en",
+        )
+
+    def test_comparison_combines_both_sources(self):
+        from unittest.mock import patch
+        from app.agent.service import ask_agent
+
+        other_url = (
+            "https://skillshikshya.com/courses/"
+            "cybersecurity-job-ready-program-in-nepal"
+        )
+        other_evidence = [{
+            "source_url": other_url,
+            "section": "Curriculum",
+            "text": "Network security and ethical hacking.",
+        }]
+
+        plan = {
+            "tool": "compare_courses",
+            "data": {
+                "comparison_ready": True,
+                "courses": [
+                    {
+                        "evidence": self.evidence,
+                        "truncated": True,
+                    },
+                    {
+                        "evidence": other_evidence,
+                        "truncated": True,
+                    },
+                ],
+            },
+        }
+
+        with (
+            patch(
+                "app.agent.service.execute_question",
+                return_value=plan,
+            ),
+            patch(
+                "app.agent.service.answer_with_evidence",
+                return_value={
+                    "answer": "Both courses teach different skills. [1, 2]",
+                    "citations": [],
+                },
+            ) as generate,
+        ):
+            result = ask_agent(
+                "Compare Revit and Cybersecurity",
+                language="en",
+                client=object(),
+            )
+
+        evidence = generate.call_args.args[1]
+        self.assertEqual(
+            [item["source_url"] for item in evidence],
+            [self.url, other_url],
+        )
+        self.assertEqual(result["retrieved_chunks"], 2)
+        self.assertIn("not a complete syllabus", result["answer"])
+
+    def test_missing_comparison_skips_generation(self):
+        from unittest.mock import patch
+        from app.agent.service import ask_agent
+
+        plan = {
+            "tool": "compare_courses",
+            "data": {
+                "comparison_ready": False,
+                "courses": [],
+                "missing_courses": [self.url],
+            },
+        }
+
+        with (
+            patch(
+                "app.agent.service.execute_question",
+                return_value=plan,
+            ),
+            patch(
+                "app.agent.service.answer_with_evidence",
+            ) as generate,
+        ):
+            result = ask_agent(
+                "Compare courses",
+                language="en",
+            )
+
+        self.assertEqual(result["citations"], [])
+        generate.assert_not_called()
+
+    def test_knowledge_search_uses_retrieved_evidence(self):
+        from unittest.mock import patch
+        from app.agent.service import ask_agent
+
+        plan = {
+            "tool": "knowledge_search",
+            "data": {"evidence": self.evidence},
+        }
+
+        with (
+            patch(
+                "app.agent.service.execute_question",
+                return_value=plan,
+            ),
+            patch(
+                "app.agent.service.answer_with_evidence",
+                return_value={
+                    "answer": "Information found. [1]",
+                    "citations": [],
+                },
+            ) as generate,
+        ):
+            result = ask_agent(
+                "How can students enroll?",
+                client=object(),
+            )
+
+        self.assertEqual(result["retrieved_chunks"], 1)
+        generate.assert_called_once()
+
+    def test_invalid_language_rejected_before_tools(self):
+        from unittest.mock import patch
+        from app.agent.service import ask_agent
+
+        with patch(
+            "app.agent.service.execute_question",
+        ) as executor:
+            with self.assertRaises(ValueError):
+                ask_agent("Hello", language="fr")
+
+        executor.assert_not_called()

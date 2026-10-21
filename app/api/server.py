@@ -9,7 +9,7 @@ from pathlib import Path
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.rag.engine import ask_skillsathi
+from app.agent.service import ask_agent
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def chat(request: ChatRequest) -> ChatResponse:
     """Answer a student question using website-grounded RAG."""
     try:
         with _chat_lock:
-            result = ask_skillsathi(
+            result = ask_agent(
                 request.question,
                 top_k=request.top_k,
                 language=request.language,

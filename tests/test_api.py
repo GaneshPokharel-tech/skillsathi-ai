@@ -32,7 +32,7 @@ class TestChatAPI(unittest.TestCase):
         }
 
         with patch(
-            "app.api.server.ask_skillsathi",
+            "app.api.server.ask_agent",
             return_value=expected,
         ) as mocked_chat:
             response = client.post(
@@ -62,7 +62,7 @@ class TestChatAPI(unittest.TestCase):
             {"question": "Hello", "unexpected": "value"},
         ]
 
-        with patch("app.api.server.ask_skillsathi") as mocked_chat:
+        with patch("app.api.server.ask_agent") as mocked_chat:
             for payload in invalid_requests:
                 with self.subTest(payload=payload):
                     response = client.post(
@@ -80,7 +80,7 @@ class TestChatAPI(unittest.TestCase):
     def test_backend_failure_is_sanitized(self):
         with (
             patch(
-                "app.api.server.ask_skillsathi",
+                "app.api.server.ask_agent",
                 side_effect=RuntimeError(
                     "SECRET_INTERNAL_ERROR"
                 ),
@@ -110,7 +110,7 @@ class TestChatAPI(unittest.TestCase):
         }
 
         with patch(
-            "app.api.server.ask_skillsathi",
+            "app.api.server.ask_agent",
             return_value=expected,
         ) as mocked_chat:
             response = client.post(
@@ -158,7 +158,7 @@ class TestChatLanguageAPI(unittest.TestCase):
         }
 
         with patch(
-            "app.api.server.ask_skillsathi",
+            "app.api.server.ask_agent",
             return_value=expected,
         ) as mocked:
             response = client.post(
@@ -182,3 +182,161 @@ class TestChatLanguageAPI(unittest.TestCase):
             json={"question": "Hello", "language": "fr"},
         )
         self.assertEqual(response.status_code, 422)
+
+
+
+class TestAgentHTTPIntegration(unittest.TestCase):
+    """Verify HTTP requests reach the agent service."""
+
+    def test_course_discovery_without_gemini(self):
+        from unittest.mock import patch
+
+        url = (
+            "https://skillshikshya.com/courses/"
+            "autodesk-revit-bim-course"
+        )
+
+        plan = {
+            "tool": "list_courses",
+            "data": {
+                "courses": [{
+                    "title": "Autodesk Revit BIM",
+                    "source_url": url,
+                }],
+            },
+        }
+
+        with (
+            patch(
+                "app.agent.service.execute_question",
+                return_value=plan,
+            ) as executor,
+            patch(
+                "app.agent.service.answer_with_evidence",
+            ) as generate,
+        ):
+            response = client.post(
+                "/chat",
+                json={
+                    "question": "List available courses",
+                    "language": "en",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+
+        body = response.json()
+        self.assertIn("Autodesk Revit BIM", body["answer"])
+        self.assertEqual(body["citations"][0]["source_url"], url)
+        self.assertEqual(body["retrieved_chunks"], 0)
+
+        executor.assert_called_once_with(
+            "List available courses",
+            top_k=4,
+        )
+        generate.assert_not_called()
+
+    def test_course_comparison_uses_agent_evidence(self):
+        import os
+        from unittest.mock import patch
+
+        analytics = (
+            "https://skillshikshya.com/courses/"
+            "business-data-analytics-job-ready-program"
+        )
+        cyber = (
+            "https://skillshikshya.com/courses/"
+            "cybersecurity-job-ready-program-in-nepal"
+        )
+
+        evidence = [
+            {
+                "source_url": analytics,
+                "section": "Curriculum",
+                "text": "SQL and Power BI.",
+            },
+            {
+                "source_url": cyber,
+                "section": "Curriculum",
+                "text": "Network security and ethical hacking.",
+            },
+        ]
+
+        plan = {
+            "tool": "compare_courses",
+            "data": {
+                "comparison_ready": True,
+                "courses": [
+                    {
+                        "evidence": [evidence[0]],
+                        "truncated": False,
+                    },
+                    {
+                        "evidence": [evidence[1]],
+                        "truncated": False,
+                    },
+                ],
+            },
+        }
+
+        generated = {
+            "answer": "Analytics uses SQL; cybersecurity teaches security. [1, 2]",
+            "citations": [
+                {
+                    "marker": "[1]",
+                    "section": "Curriculum",
+                    "source_url": analytics,
+                },
+                {
+                    "marker": "[2]",
+                    "section": "Curriculum",
+                    "source_url": cyber,
+                },
+            ],
+        }
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GEMINI_API_KEY": "mock-test-key",
+                    "GEMINI_MODEL": "gemini-3.5-flash-lite",
+                },
+            ),
+            patch(
+                "app.agent.service.execute_question",
+                return_value=plan,
+            ),
+            patch(
+                "app.agent.service.answer_with_evidence",
+                return_value=generated,
+            ) as generate,
+            patch("google.genai.Client") as gemini_client,
+        ):
+            response = client.post(
+                "/chat",
+                json={
+                    "question": "Compare Data Analytics vs Cybersecurity",
+                    "language": "en",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+
+        body = response.json()
+        self.assertEqual(body["retrieved_chunks"], 2)
+        self.assertEqual(len(body["citations"]), 2)
+        self.assertEqual(
+            {item["source_url"] for item in body["citations"]},
+            {analytics, cyber},
+        )
+
+        self.assertEqual(
+            generate.call_args.args[1],
+            evidence,
+        )
+        self.assertEqual(
+            generate.call_args.kwargs["language"],
+            "en",
+        )
+        gemini_client.return_value.close.assert_called_once()
