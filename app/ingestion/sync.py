@@ -223,3 +223,128 @@ def stage_page_refresh(
         **plan,
         "upsert_vectors": validated,
     }
+
+
+
+ACTIVE_COLLECTION_ALIAS = "skillshikshya_active"
+
+
+def activate_collection_snapshot(
+    client,
+    *,
+    alias_name: str,
+    expected_active_collection: str,
+    staged_collection: str,
+    expected_chunk_ids: list[str],
+) -> dict:
+    """Validate a complete staged snapshot before switching its alias.
+
+    The caller must establish that expected_chunk_ids represents an
+    approved, complete snapshot. This function never deletes collections.
+    """
+    from qdrant_client import models
+
+    names = (
+        alias_name,
+        expected_active_collection,
+        staged_collection,
+    )
+
+    if any(
+        not isinstance(name, str) or not name.strip()
+        for name in names
+    ):
+        raise ValueError("Collection and alias names are required.")
+
+    if len(set(names)) != 3:
+        raise ValueError("Alias and collection names must be distinct.")
+
+    if (
+        not isinstance(expected_chunk_ids, list)
+        or not expected_chunk_ids
+        or any(
+            not isinstance(identifier, str) or not identifier
+            for identifier in expected_chunk_ids
+        )
+        or len(set(expected_chunk_ids)) != len(expected_chunk_ids)
+    ):
+        raise ValueError("A unique, nonempty chunk manifest is required.")
+
+    aliases = {
+        item.alias_name: item.collection_name
+        for item in client.get_aliases().aliases
+    }
+
+    if aliases.get(alias_name) != expected_active_collection:
+        raise ValueError(
+            "Active alias changed or was not initialized."
+        )
+
+    if (
+        not client.collection_exists(expected_active_collection)
+        or not client.collection_exists(staged_collection)
+    ):
+        raise ValueError("Required collection is missing.")
+
+    old_config = client.get_collection(
+        expected_active_collection
+    ).config.params.vectors
+
+    new_config = client.get_collection(
+        staged_collection
+    ).config.params.vectors
+
+    if (
+        isinstance(old_config, dict)
+        or isinstance(new_config, dict)
+        or old_config.size != new_config.size
+        or old_config.distance != new_config.distance
+    ):
+        raise ValueError("Incompatible snapshot vector configuration.")
+
+    actual_ids = set()
+    offset = None
+
+    while True:
+        records, offset = client.scroll(
+            collection_name=staged_collection,
+            limit=256,
+            offset=offset,
+            with_payload=False,
+            with_vectors=False,
+        )
+
+        actual_ids.update(str(record.id) for record in records)
+
+        if offset is None:
+            break
+
+    expected_ids = set(expected_chunk_ids)
+
+    if actual_ids != expected_ids:
+        raise ValueError(
+            "Staged snapshot does not match approved chunk manifest."
+        )
+
+    client.update_collection_aliases(
+        change_aliases_operations=[
+            models.DeleteAliasOperation(
+                delete_alias=models.DeleteAlias(
+                    alias_name=alias_name,
+                )
+            ),
+            models.CreateAliasOperation(
+                create_alias=models.CreateAlias(
+                    collection_name=staged_collection,
+                    alias_name=alias_name,
+                )
+            ),
+        ]
+    )
+
+    return {
+        "alias_name": alias_name,
+        "previous_collection": expected_active_collection,
+        "active_collection": staged_collection,
+        "verified_chunks": len(actual_ids),
+    }

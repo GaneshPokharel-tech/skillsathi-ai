@@ -306,6 +306,25 @@ COLLECTION_NAME = "skillshikshya_bge_small_en_v15"
 QDRANT_PATH = Path(__file__).resolve().parents[2] / "data" / "qdrant"
 
 
+def resolve_read_collection(client, requested_name: str) -> str:
+    """Prefer the active snapshot for default reads.
+
+    Preserve the original collection when no active alias exists.
+    Explicit non-default collection names are unchanged.
+    """
+    from app.ingestion.sync import ACTIVE_COLLECTION_ALIAS
+
+    if requested_name != COLLECTION_NAME:
+        return requested_name
+
+    for alias in client.get_aliases().aliases:
+        if alias.alias_name == ACTIVE_COLLECTION_ALIAS:
+            return ACTIVE_COLLECTION_ALIAS
+
+    return requested_name
+
+
+
 def retrieve_evidence(
     question: str,
     *,
@@ -330,6 +349,11 @@ def retrieve_evidence(
     client = QdrantClient(path=str(QDRANT_PATH))
 
     try:
+        collection_name = resolve_read_collection(
+            client,
+            collection_name,
+        )
+
         if not client.collection_exists(collection_name):
             raise ValueError(
                 f"Collection not found: {collection_name}"

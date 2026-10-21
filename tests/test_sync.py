@@ -380,3 +380,140 @@ class TestStagedPageRefresh(unittest.TestCase):
             )
 
         self.assertEqual(self.stored_ids(), before)
+
+
+
+class TestSnapshotActivation(unittest.TestCase):
+
+    def setUp(self):
+        from qdrant_client import QdrantClient, models
+
+        self.client = QdrantClient(":memory:")
+        self.models = models
+
+        for name, identifier, generation in (
+            ("snapshot_old", 101, "old"),
+            ("snapshot_new", 202, "new"),
+        ):
+            self.client.create_collection(
+                collection_name=name,
+                vectors_config=models.VectorParams(
+                    size=3,
+                    distance=models.Distance.COSINE,
+                ),
+            )
+
+            self.client.upsert(
+                collection_name=name,
+                points=[
+                    models.PointStruct(
+                        id=identifier,
+                        vector=[1.0, 0.0, 0.0],
+                        payload={"generation": generation},
+                    )
+                ],
+                wait=True,
+            )
+
+        self.client.update_collection_aliases(
+            change_aliases_operations=[
+                models.CreateAliasOperation(
+                    create_alias=models.CreateAlias(
+                        collection_name="snapshot_old",
+                        alias_name="active_test",
+                    )
+                )
+            ]
+        )
+
+    def tearDown(self):
+        self.client.close()
+
+    def active_generation(self):
+        records = self.client.scroll(
+            collection_name="active_test",
+            limit=10,
+            with_payload=True,
+        )[0]
+        return records[0].payload["generation"]
+
+    def activate(self, **overrides):
+        from app.ingestion.sync import activate_collection_snapshot
+
+        arguments = {
+            "alias_name": "active_test",
+            "expected_active_collection": "snapshot_old",
+            "staged_collection": "snapshot_new",
+            "expected_chunk_ids": ["202"],
+        }
+
+        arguments.update(overrides)
+
+        return activate_collection_snapshot(
+            self.client,
+            **arguments,
+        )
+
+    def test_valid_snapshot_switches_active_alias(self):
+        self.assertEqual(self.active_generation(), "old")
+
+        result = self.activate()
+
+        self.assertEqual(self.active_generation(), "new")
+        self.assertEqual(result["verified_chunks"], 1)
+        self.assertEqual(
+            result["previous_collection"],
+            "snapshot_old",
+        )
+
+        # Old snapshot remains available for rollback.
+        old_records = self.client.scroll(
+            collection_name="snapshot_old",
+            limit=10,
+            with_payload=True,
+        )[0]
+
+        self.assertEqual(
+            old_records[0].payload["generation"],
+            "old",
+        )
+
+    def test_incomplete_snapshot_never_activates(self):
+        with self.assertRaises(ValueError):
+            self.activate(
+                expected_chunk_ids=["202", "999"],
+            )
+
+        self.assertEqual(self.active_generation(), "old")
+
+    def test_unexpected_extra_chunks_are_rejected(self):
+        with self.assertRaises(ValueError):
+            self.activate(
+                expected_chunk_ids=["999"],
+            )
+
+        self.assertEqual(self.active_generation(), "old")
+
+    def test_stale_alias_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.activate(
+                expected_active_collection="wrong_collection",
+            )
+
+        self.assertEqual(self.active_generation(), "old")
+
+    def test_missing_staged_collection_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.activate(
+                staged_collection="missing_snapshot",
+            )
+
+        self.assertEqual(self.active_generation(), "old")
+
+    def test_duplicate_manifest_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.activate(
+                expected_chunk_ids=["202", "202"],
+            )
+
+        self.assertEqual(self.active_generation(), "old")

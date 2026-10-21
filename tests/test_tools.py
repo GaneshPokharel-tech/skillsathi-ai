@@ -38,6 +38,13 @@ class FakeQdrantClient:
 
         return records, next_offset
 
+    def get_aliases(self):
+        """Simulate a legacy Qdrant database without an active alias."""
+        from types import SimpleNamespace
+
+        return SimpleNamespace(aliases=[])
+
+
 
 class TestCourseDiscovery(unittest.TestCase):
 

@@ -2,7 +2,11 @@
 
 from urllib.parse import urlsplit
 
-from app.rag.engine import COLLECTION_NAME, QDRANT_PATH
+from app.rag.engine import (
+    COLLECTION_NAME,
+    QDRANT_PATH,
+    resolve_read_collection,
+)
 
 
 def _course_url(value: object) -> str | None:
@@ -65,6 +69,11 @@ def list_courses(
         client = QdrantClient(path=str(QDRANT_PATH))
 
     try:
+        collection_name = resolve_read_collection(
+            client,
+            collection_name,
+        )
+
         if not client.collection_exists(collection_name):
             raise ValueError(
                 f"Qdrant collection not found: {collection_name}"
@@ -184,6 +193,11 @@ def get_course_details(
         client = QdrantClient(path=str(QDRANT_PATH))
 
     try:
+        collection_name = resolve_read_collection(
+            client,
+            collection_name,
+        )
+
         if not client.collection_exists(collection_name):
             raise ValueError("Qdrant collection not found.")
 
