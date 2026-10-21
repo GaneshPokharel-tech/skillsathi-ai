@@ -585,3 +585,147 @@ class TestAgentAnswerService(unittest.TestCase):
                 ask_agent("Hello", language="fr")
 
         executor.assert_not_called()
+
+
+
+class TestPendingCourseSelection(unittest.TestCase):
+
+    def setUp(self):
+        self.first = {
+            "title": "Advanced OCR & Tax VAT Training",
+            "source_url": (
+                "https://skillshikshya.com/courses/"
+                "advanced-ocr-tax-vat-training-in-nepal"
+            ),
+        }
+        self.second = {
+            "title": "Complete Accounting to Tax Closure Training",
+            "source_url": (
+                "https://skillshikshya.com/courses/"
+                "accounting-to-tax-closure-training"
+            ),
+        }
+        self.urls = [
+            self.first["source_url"],
+            self.second["source_url"],
+        ]
+
+    def test_clarification_returns_structured_options(self):
+        from unittest.mock import patch
+        from app.agent.service import ask_agent
+
+        plan = {
+            "tool": "clarify",
+            "data": {
+                "matched_courses": [self.first, self.second],
+            },
+        }
+
+        with patch(
+            "app.agent.service.execute_question",
+            return_value=plan,
+        ):
+            result = ask_agent(
+                "Tell me about the tax course",
+                language="en",
+            )
+
+        self.assertEqual(
+            result["pending_course_urls"],
+            self.urls,
+        )
+        self.assertEqual(
+            result["citations"][1]["section"],
+            self.second["title"],
+        )
+
+    def test_second_one_resolves_to_exact_indexed_course(self):
+        from unittest.mock import patch
+        from app.agent.service import ask_agent
+
+        details = {
+            "title": self.second["title"],
+            "source_url": self.second["source_url"],
+            "evidence": [{
+                "source_url": self.second["source_url"],
+                "section": "Curriculum",
+                "text": "Accounting and tax training.",
+            }],
+            "truncated": False,
+        }
+
+        with (
+            patch(
+                "app.tools.courses.list_courses",
+                return_value=[self.first, self.second],
+            ),
+            patch(
+                "app.tools.courses.get_course_details",
+                return_value=details,
+            ) as get_details,
+            patch(
+                "app.agent.service.execute_question",
+            ) as normal_router,
+            patch(
+                "app.agent.service.answer_with_evidence",
+                return_value={
+                    "answer": "Accounting and tax training. [1]",
+                    "citations": [],
+                },
+            ) as generate,
+        ):
+            result = ask_agent(
+                "second one",
+                language="en",
+                pending_course_urls=self.urls,
+                client=object(),
+            )
+
+        get_details.assert_called_once_with(
+            self.second["source_url"],
+            max_chunks=8,
+        )
+        normal_router.assert_not_called()
+        self.assertIn(
+            self.second["title"],
+            generate.call_args.args[0],
+        )
+        self.assertEqual(result["retrieved_chunks"], 1)
+
+    def test_forged_course_url_is_rejected(self):
+        from unittest.mock import patch
+        from app.agent.service import ask_agent
+
+        with (
+            patch(
+                "app.tools.courses.list_courses",
+                return_value=[self.first, self.second],
+            ),
+            patch(
+                "app.tools.courses.get_course_details",
+            ) as details_tool,
+        ):
+            with self.assertRaises(ValueError):
+                ask_agent(
+                    "second one",
+                    language="en",
+                    pending_course_urls=[
+                        self.first["source_url"],
+                        "https://evil.example/courses/fake",
+                    ],
+                    client=object(),
+                )
+
+        details_tool.assert_not_called()
+
+    def test_ordinal_without_context_does_not_use_gemini(self):
+        from unittest.mock import patch
+        from app.agent.service import ask_agent
+
+        with patch(
+            "app.agent.service.execute_question",
+        ) as executor:
+            result = ask_agent("दोस्रो वाला", language="ne")
+
+        self.assertIn("कोर्सको नाम", result["answer"])
+        executor.assert_not_called()

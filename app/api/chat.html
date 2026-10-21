@@ -220,6 +220,7 @@
     const suggestions = [...document.querySelectorAll("[data-prompt]")];
     const languageButtons = [...document.querySelectorAll("[data-language]")];
     let selectedLanguage = null;
+    let pendingCourseUrls = null;
     let busy = false;
 
     const strings = {
@@ -232,7 +233,7 @@
         send: "पठाउनुहोस्",
         wait: "जानकारी खोज्दैछु...",
         sources: "वेबसाइटका स्रोतहरू",
-        note: "AI का उत्तरमा त्रुटि हुन सक्छ। महत्त्वपूर्ण विवरण SkillShikshya सँग पुष्टि गर्नुहोस्। प्रत्येक प्रश्नको छुट्टै उत्तर दिइन्छ।",
+        note: "AI का उत्तरमा त्रुटि हुन सक्छ। महत्त्वपूर्ण विवरण SkillShikshya सँग पुष्टि गर्नुहोस्। कोर्स छनोटको follow-up मा मात्र अघिल्ला विकल्प प्रयोग गरिन्छ।",
         error: "अहिले उत्तर दिन सकिएन। कृपया फेरि प्रयास गर्नुहोस्।",
         timeout: "समय सीमा सकियो। कृपया फेरि प्रयास गर्नुहोस्।",
         changed: "भाषा नेपालीमा परिवर्तन भयो। अबका उत्तर नेपालीमा आउनेछन्।"
@@ -246,7 +247,7 @@
         send: "Send",
         wait: "Looking up website information...",
         sources: "Website sources",
-        note: "AI answers can be inaccurate. Verify important details with SkillShikshya. Each question is answered independently.",
+        note: "AI answers can be inaccurate. Verify important details with SkillShikshya. Only course-selection follow-ups use the previous course options.",
         error: "I couldn't generate an answer right now. Please try again.",
         timeout: "The request timed out. Please try again.",
         changed: "Language switched to English. Future replies will be in English."
@@ -391,12 +392,28 @@
         const response = await fetch("/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question, top_k: 4, language: selectedLanguage }),
+          body: JSON.stringify({
+            question,
+            top_k: 4,
+            language: languageForRequest,
+            ...(pendingCourseUrls
+              ? { pending_course_urls: pendingCourseUrls }
+              : {})
+          }),
           signal: controller.signal
         });
         if (!response.ok) throw new Error("HTTP " + response.status);
         const data = await response.json();
         if (typeof data.answer !== "string" || !data.answer.trim()) throw new Error("Empty answer");
+        const options = data.pending_course_urls;
+
+        pendingCourseUrls = (
+          Array.isArray(options) &&
+          options.length >= 2 &&
+          options.length <= 5 &&
+          options.every(url => typeof url === "string")
+        ) ? [...options] : null;
+
         pending.remove();
         appendMessage("assistant", data.answer, data.citations, true);
       } catch (error) {

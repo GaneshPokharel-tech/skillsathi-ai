@@ -29,6 +29,9 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     top_k: int = Field(default=4, strict=True, ge=1, le=10)
     language: Literal["ne", "en"] = "ne"
+    pending_course_urls: list[str] | None = Field(
+        default=None, min_length=2, max_length=5
+    )
 
     @field_validator("question")
     @classmethod
@@ -49,6 +52,7 @@ class ChatResponse(BaseModel):
     answer: str
     citations: list[Citation]
     retrieved_chunks: int = Field(ge=0)
+    pending_course_urls: list[str] | None = None
 
 
 @app.get("/", include_in_schema=False)
@@ -66,15 +70,28 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/chat", response_model=ChatResponse)
+@app.post(
+    "/chat",
+    response_model=ChatResponse,
+    response_model_exclude_none=True,
+)
 def chat(request: ChatRequest) -> ChatResponse:
     """Answer a student question using website-grounded RAG."""
     try:
         with _chat_lock:
+            options = {
+                "top_k": request.top_k,
+                "language": request.language,
+            }
+
+            if request.pending_course_urls is not None:
+                options["pending_course_urls"] = (
+                    request.pending_course_urls
+                )
+
             result = ask_agent(
                 request.question,
-                top_k=request.top_k,
-                language=request.language,
+                **options,
             )
         return ChatResponse.model_validate(result)
 

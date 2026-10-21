@@ -340,3 +340,74 @@ class TestAgentHTTPIntegration(unittest.TestCase):
             "en",
         )
         gemini_client.return_value.close.assert_called_once()
+
+
+
+class TestCourseFollowupHTTP(unittest.TestCase):
+
+    def test_followup_context_reaches_agent(self):
+        first = (
+            "https://skillshikshya.com/courses/"
+            "advanced-ocr-tax-vat-training-in-nepal"
+        )
+        second = (
+            "https://skillshikshya.com/courses/"
+            "accounting-to-tax-closure-training"
+        )
+
+        options = [first, second]
+
+        with patch(
+            "app.api.server.ask_agent",
+            return_value={
+                "answer": "Selected course information. [1]",
+                "citations": [],
+                "retrieved_chunks": 2,
+            },
+        ) as agent:
+            response = client.post(
+                "/chat",
+                json={
+                    "question": "second one",
+                    "language": "en",
+                    "pending_course_urls": options,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        agent.assert_called_once_with(
+            "second one",
+            top_k=4,
+            language="en",
+            pending_course_urls=options,
+        )
+
+    def test_too_many_pending_options_returns_422(self):
+        response = client.post(
+            "/chat",
+            json={
+                "question": "second one",
+                "language": "en",
+                "pending_course_urls": ["x"] * 6,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+
+
+class TestCourseFollowupFrontend(unittest.TestCase):
+
+    def test_browser_chat_includes_followup_context(self):
+        response = client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("let pendingCourseUrls = null", response.text)
+        self.assertIn(
+            "pending_course_urls: pendingCourseUrls",
+            response.text,
+        )
+        self.assertIn(
+            "const options = data.pending_course_urls",
+            response.text,
+        )

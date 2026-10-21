@@ -7,12 +7,51 @@ from app.agent.executor import execute_question
 from app.rag.engine import answer_with_evidence
 
 
+
+CHOICE_WORDS = (
+    {
+        "1", "1st", "first", "first one", "the first one",
+        "option 1", "number one", "पहिलो", "पहिलो वाला",
+    },
+    {
+        "2", "2nd", "second", "second one", "the second one",
+        "option 2", "number two", "दोस्रो", "दोस्रो वाला",
+        "दोश्रो", "दोश्रो वाला",
+    },
+    {
+        "3", "3rd", "third", "third one", "option 3",
+        "तेस्रो", "तेस्रो वाला",
+    },
+    {
+        "4", "4th", "fourth", "fourth one", "option 4",
+        "चौथो", "चौथो वाला",
+    },
+    {
+        "5", "5th", "fifth", "fifth one", "option 5",
+        "पाँचौँ", "पाँचौँ वाला",
+    },
+)
+
+
+def _selected_option(question: str) -> int | None:
+    """Resolve an explicit numbered follow-up selection."""
+    normalized = " ".join(question.casefold().split())
+
+    for index, choices in enumerate(CHOICE_WORDS):
+        if normalized in choices:
+            return index
+
+    return None
+
+
+
 def ask_agent(
     question: str,
     *,
     language: str = "ne",
     top_k: int = 4,
     client=None,
+    pending_course_urls: list[str] | None = None,
 ) -> dict:
     """Execute a tool and return an answer with source references."""
     if language not in ("ne", "en"):
@@ -28,7 +67,78 @@ def ask_agent(
     ):
         raise ValueError("top_k must be between 1 and 10.")
 
-    plan = execute_question(question.strip(), top_k=top_k)
+    if pending_course_urls is not None:
+        if (
+            not isinstance(pending_course_urls, list)
+            or not 2 <= len(pending_course_urls) <= 5
+            or any(
+                not isinstance(url, str) or not url
+                for url in pending_course_urls
+            )
+            or len(set(pending_course_urls)) != len(pending_course_urls)
+        ):
+            raise ValueError("Invalid pending course options.")
+
+    selected = _selected_option(question)
+    effective_question = question.strip()
+
+    if selected is not None and pending_course_urls is not None:
+        if selected >= len(pending_course_urls):
+            return {
+                "answer": (
+                    "Please choose one of the displayed course numbers."
+                    if language == "en"
+                    else "कृपया देखाइएका कोर्स नम्बरमध्ये एउटा छान्नुहोस्।"
+                ),
+                "citations": [],
+                "retrieved_chunks": 0,
+                "pending_course_urls": pending_course_urls,
+            }
+
+        from app.tools.courses import list_courses, get_course_details
+
+        catalog = {
+            course["source_url"]: course
+            for course in list_courses()
+        }
+
+        if any(url not in catalog for url in pending_course_urls):
+            raise ValueError("Course context is not in the indexed catalog.")
+
+        chosen_url = pending_course_urls[selected]
+        chosen_course = catalog[chosen_url]
+
+        details = get_course_details(
+            chosen_url,
+            max_chunks=8,
+        )
+
+        plan = {
+            "tool": "get_course_details",
+            "data": {
+                "found": details is not None,
+                "course": details,
+            },
+        }
+
+        effective_question = (
+            "Explain the curriculum, skills and learning outcomes of "
+            f"{chosen_course['title']}, using only website evidence."
+        )
+
+    elif selected is not None:
+        return {
+            "answer": (
+                "Please mention the course name first."
+                if language == "en"
+                else "कृपया पहिले कोर्सको नाम बताउनुहोस्।"
+            ),
+            "citations": [],
+            "retrieved_chunks": 0,
+        }
+
+    else:
+        plan = execute_question(question.strip(), top_k=top_k)
     tool = plan["tool"]
     data = plan["data"]
 
@@ -60,7 +170,7 @@ def ask_agent(
             lines.append(f"{index}. {course['title']} {marker}")
             citations.append({
                 "marker": marker,
-                "section": "Course option",
+                "section": course["title"],
                 "source_url": course["source_url"],
             })
 
@@ -80,11 +190,19 @@ def ask_agent(
                 else "मिल्ने इन्डेक्स गरिएको कोर्स भेटिएन।"
             ]
 
-        return {
+        response = {
             "answer": "\n".join(lines),
             "citations": citations,
             "retrieved_chunks": 0,
         }
+
+        if tool == "clarify" and len(courses) >= 2:
+            response["pending_course_urls"] = [
+                course["source_url"]
+                for course in courses
+            ]
+
+        return response
 
     if tool == "get_course_details":
         course = data["course"] if data["found"] else None
@@ -161,7 +279,7 @@ def ask_agent(
 
     try:
         result = answer_with_evidence(
-            question.strip(),
+            effective_question,
             evidence,
             client=client,
             model=model,
