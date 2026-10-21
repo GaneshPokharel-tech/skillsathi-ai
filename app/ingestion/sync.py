@@ -348,3 +348,299 @@ def activate_collection_snapshot(
         "active_collection": staged_collection,
         "verified_chunks": len(actual_ids),
     }
+
+
+
+def build_staged_page_snapshot(
+    client,
+    *,
+    source_collection: str,
+    staged_collection: str,
+    plan: dict,
+) -> dict:
+    """Build a separate snapshot without changing the active collection.
+
+    The plan must come from a validated page refresh. This function
+    handles one page; complete website refresh validation is separate.
+    """
+    import math
+    from qdrant_client import models
+
+    if (
+        not isinstance(source_collection, str)
+        or not source_collection.strip()
+        or not isinstance(staged_collection, str)
+        or not staged_collection.strip()
+        or source_collection == staged_collection
+    ):
+        raise ValueError("Distinct collection names are required.")
+
+    if not isinstance(plan, dict):
+        raise ValueError("A validated refresh plan is required.")
+
+    try:
+        source_url = plan["source_url"]
+        additions = plan["upsert_chunks"]
+        vectors = plan["upsert_vectors"]
+        removed = plan["delete_ids"]
+        unchanged = plan["unchanged_ids"]
+    except KeyError as exc:
+        raise ValueError("Incomplete refresh plan.") from exc
+
+    if not isinstance(source_url, str) or not source_url.strip():
+        raise ValueError("Invalid source URL.")
+
+    if any(not isinstance(group, list) for group in (
+        additions, vectors, removed, unchanged
+    )):
+        raise ValueError("Invalid refresh plan structure.")
+
+    if len(additions) != len(vectors):
+        raise ValueError("Missing staged embeddings.")
+
+    if not additions and not unchanged:
+        raise ValueError("Cannot replace a page with empty content.")
+
+    old_ids = removed + unchanged
+
+    if (
+        any(not isinstance(item, str) or not item for item in old_ids)
+        or len(old_ids) != len(set(old_ids))
+    ):
+        raise ValueError("Invalid existing chunk IDs.")
+
+    if not client.collection_exists(source_collection):
+        raise ValueError("Source collection does not exist.")
+
+    if client.collection_exists(staged_collection):
+        raise ValueError("Staged collection already exists.")
+
+    configuration = client.get_collection(
+        source_collection
+    ).config.params.vectors
+
+    if (
+        isinstance(configuration, dict)
+        or configuration.size < 1
+        or configuration.distance != models.Distance.COSINE
+    ):
+        raise ValueError("Unsupported source vector configuration.")
+
+    prepared = []
+    new_ids = set()
+
+    for chunk, vector in zip(additions, vectors):
+        if (
+            not isinstance(chunk, dict)
+            or chunk.get("source_url") != source_url
+            or not isinstance(chunk.get("text"), str)
+            or not chunk["text"].strip()
+        ):
+            raise ValueError("Invalid updated chunk.")
+
+        identifier = chunk.get("chunk_id")
+
+        if (
+            not isinstance(identifier, str)
+            or not identifier
+            or identifier in new_ids
+        ):
+            raise ValueError("Duplicate or invalid updated chunk ID.")
+
+        if (
+            not isinstance(vector, (list, tuple))
+            or len(vector) != configuration.size
+        ):
+            raise ValueError("Invalid staged vector dimension.")
+
+        try:
+            values = [float(value) for value in vector]
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("Invalid staged vector values.") from exc
+
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("Non-finite staged vector.")
+
+        new_ids.add(identifier)
+
+        prepared.append(models.PointStruct(
+            id=identifier,
+            vector=values,
+            payload={
+                "source_url": source_url,
+                "document_title": chunk["document_title"],
+                "section": chunk["section"],
+                "text": chunk["text"],
+            },
+        ))
+
+    retained = []
+    source_ids = set()
+    all_old_ids = set()
+    offset = None
+
+    while True:
+        records, offset = client.scroll(
+            collection_name=source_collection,
+            limit=128,
+            offset=offset,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        for record in records:
+            identifier = str(record.id)
+            all_old_ids.add(identifier)
+
+            if (record.payload or {}).get("source_url") == source_url:
+                source_ids.add(identifier)
+
+            if identifier not in removed:
+                retained.append(models.PointStruct(
+                    id=record.id,
+                    vector=record.vector,
+                    payload=record.payload or {},
+                ))
+
+        if offset is None:
+            break
+
+    if source_ids != set(old_ids):
+        raise ValueError("Refresh plan does not match indexed page.")
+
+    if new_ids & all_old_ids:
+        raise ValueError("Updated IDs collide with existing points.")
+
+    expected_ids = sorted(
+        {str(point.id) for point in retained} | new_ids
+    )
+
+    client.create_collection(
+        collection_name=staged_collection,
+        vectors_config=models.VectorParams(
+            size=configuration.size,
+            distance=configuration.distance,
+        ),
+    )
+
+    try:
+        points = retained + prepared
+
+        for position in range(0, len(points), 128):
+            client.upsert(
+                collection_name=staged_collection,
+                points=points[position:position + 128],
+                wait=True,
+            )
+
+        actual_ids = set()
+        offset = None
+
+        while True:
+            records, offset = client.scroll(
+                collection_name=staged_collection,
+                limit=128,
+                offset=offset,
+                with_payload=False,
+                with_vectors=False,
+            )
+
+            actual_ids.update(str(record.id) for record in records)
+
+            if offset is None:
+                break
+
+        if actual_ids != set(expected_ids):
+            raise ValueError("Staged snapshot verification failed.")
+
+    except Exception:
+        try:
+            client.delete_collection(
+                collection_name=staged_collection,
+            )
+        except Exception:
+            pass
+        raise
+
+    return {
+        "staged_collection": staged_collection,
+        "expected_chunk_ids": expected_ids,
+        "copied_chunks": len(retained),
+        "updated_chunks": len(prepared),
+        "removed_chunks": len(removed),
+    }
+
+
+
+def refresh_page_snapshot(
+    client,
+    *,
+    source_collection: str,
+    staged_collection: str,
+    alias_name: str,
+    source_url: str,
+    fresh_chunks: list[dict],
+    embed_texts,
+    vector_size: int,
+) -> dict:
+    """Stage, verify and activate a single successfully crawled page.
+
+    Requires a previously initialized alias, validated complete page
+    content, and exclusive database-write coordination. Never deletes
+    the previous active collection.
+    """
+    if (
+        not isinstance(alias_name, str)
+        or not alias_name.strip()
+    ):
+        raise ValueError("An active alias name is required.")
+
+    aliases = {
+        alias.alias_name: alias.collection_name
+        for alias in client.get_aliases().aliases
+    }
+
+    if aliases.get(alias_name) != source_collection:
+        raise ValueError(
+            "Active alias is missing or points to another collection."
+        )
+
+    plan = stage_page_refresh(
+        client,
+        collection_name=source_collection,
+        source_url=source_url,
+        fresh_chunks=fresh_chunks,
+        embed_texts=embed_texts,
+        vector_size=vector_size,
+    )
+
+    if not plan["upsert_chunks"] and not plan["delete_ids"]:
+        return {
+            "status": "unchanged",
+            "active_collection": source_collection,
+            "updated_chunks": 0,
+            "removed_chunks": 0,
+        }
+
+    built = build_staged_page_snapshot(
+        client,
+        source_collection=source_collection,
+        staged_collection=staged_collection,
+        plan=plan,
+    )
+
+    activated = activate_collection_snapshot(
+        client,
+        alias_name=alias_name,
+        expected_active_collection=source_collection,
+        staged_collection=staged_collection,
+        expected_chunk_ids=built["expected_chunk_ids"],
+    )
+
+    return {
+        "status": "activated",
+        **activated,
+        "copied_chunks": built["copied_chunks"],
+        "updated_chunks": built["updated_chunks"],
+        "removed_chunks": built["removed_chunks"],
+    }
