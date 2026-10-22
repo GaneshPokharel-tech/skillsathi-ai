@@ -983,3 +983,140 @@ def process_crawl_run(
         temporary_report.replace(report_path)
 
     return report
+
+
+
+def verify_published_crawl_run(
+    *,
+    manifest_path,
+    processed_pages_dir,
+    report_path,
+) -> dict:
+    """Verify a published crawl run against its actual cleaned files.
+
+    Read-only validation. This does not access Qdrant or activate an
+    index snapshot. Call it again immediately before a future publish.
+    """
+    import hashlib
+    import json
+    from pathlib import Path
+
+    from app.ingestion.crawler import normalize_content_url, page_id
+
+    def read_json(path, description):
+        if not path.is_file():
+            raise ValueError(f"Missing {description}: {path}")
+
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Invalid {description}: {path}") from exc
+
+        if not isinstance(value, dict):
+            raise ValueError(f"{description} must be a JSON object.")
+
+        return value
+
+    manifest = read_json(Path(manifest_path), "crawl manifest")
+    report = read_json(Path(report_path), "cleaning report")
+    directory = Path(processed_pages_dir)
+
+    run_id = manifest.get("run_id")
+    urls = manifest.get("expected_urls")
+    crawled = manifest.get("pages")
+    processed = report.get("pages")
+
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("Missing crawl run ID.")
+
+    if (
+        not isinstance(urls, list)
+        or not urls
+        or any(not isinstance(url, str) or not url for url in urls)
+        or len(set(urls)) != len(urls)
+    ):
+        raise ValueError("Invalid expected crawl URLs.")
+
+    count = len(urls)
+
+    if (
+        manifest.get("status") != "complete"
+        or manifest.get("attempted") != count
+        or manifest.get("successful") != count
+        or manifest.get("failed") != 0
+        or report.get("run_id") != run_id
+        or report.get("processed") != count
+        or report.get("skipped") != 0
+        or report.get("failed") != 0
+    ):
+        raise ValueError("Crawl or processing report is incomplete.")
+
+    result = validate_crawl_snapshot(
+        run_id=run_id,
+        expected_urls=urls,
+        crawled_pages=crawled,
+        processed_pages=processed,
+    )
+
+    if any(
+        record.get("final_url") != record["source_url"]
+        for record in crawled
+    ):
+        raise ValueError("Unexpected crawl redirect.")
+
+    records_by_url = {
+        record["source_url"]: record
+        for record in processed
+    }
+
+    for url in urls:
+        if normalize_content_url(url) != url:
+            raise ValueError(f"Unapproved or noncanonical URL: {url}")
+
+        identifier = page_id(url)
+        filename = identifier + ".md"
+
+        markdown_path = directory / filename
+        metadata_path = directory / (identifier + ".json")
+
+        if not markdown_path.is_file():
+            raise ValueError(f"Missing processed Markdown: {url}")
+
+        metadata = read_json(
+            metadata_path,
+            "processed page metadata",
+        )
+        record = records_by_url[url]
+
+        if (
+            metadata.get("run_id") != run_id
+            or metadata.get("source_url") != url
+            or record.get("file") != filename
+        ):
+            raise ValueError(f"Stale or mismatched page metadata: {url}")
+
+        try:
+            markdown_bytes = markdown_path.read_bytes()
+            markdown = markdown_bytes.decode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ValueError(
+                f"Unreadable processed Markdown: {url}"
+            ) from exc
+
+        if not markdown.strip():
+            raise ValueError(f"Empty processed Markdown: {url}")
+
+        digest = hashlib.sha256(markdown_bytes).hexdigest()
+        characters = len(markdown)
+
+        if (
+            metadata.get("content_hash") != digest
+            or record.get("content_hash") != digest
+            or metadata.get("cleaned_character_count") != characters
+            or record.get("cleaned_character_count") != characters
+        ):
+            raise ValueError(
+                f"Published content does not match its report: {url}"
+            )
+
+    return result

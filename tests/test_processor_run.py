@@ -175,5 +175,97 @@ class TestManifestBoundProcessing(unittest.TestCase):
         self.assertEqual(result["validated_pages"], 2)
 
 
+    def verify_published(self):
+        return sync.verify_published_crawl_run(
+            manifest_path=self.manifest_path,
+            processed_pages_dir=self.processed_dir,
+            report_path=self.report_path,
+        )
+
+    def test_verifier_accepts_complete_published_run(self):
+        self.process()
+
+        result = self.verify_published()
+
+        self.assertEqual(result["run_id"], self.run_id)
+        self.assertEqual(result["validated_pages"], 2)
+        self.assertEqual(
+            set(result["validated_urls"]),
+            set(self.urls),
+        )
+
+    def test_verifier_rejects_modified_cleaned_markdown(self):
+        self.process()
+
+        path = self.processed_dir / (
+            page_id(self.urls[0]) + ".md"
+        )
+
+        path.write_text(
+            path.read_text(encoding="utf-8")
+            + " Unauthorized content change.",
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ValueError):
+            self.verify_published()
+
+    def test_verifier_rejects_stale_processed_metadata(self):
+        self.process()
+
+        path = self.processed_dir / (
+            page_id(self.urls[0]) + ".json"
+        )
+
+        metadata = json.loads(path.read_text(encoding="utf-8"))
+        metadata["run_id"] = "previous-run"
+
+        path.write_text(
+            json.dumps(metadata),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ValueError):
+            self.verify_published()
+
+    def test_verifier_rejects_incomplete_manifest(self):
+        self.process()
+
+        self.manifest["status"] = "incomplete"
+        self.save_manifest()
+
+        with self.assertRaises(ValueError):
+            self.verify_published()
+
+    def test_verifier_rejects_stale_cleaning_report(self):
+        self.process()
+
+        report = json.loads(
+            self.report_path.read_text(encoding="utf-8")
+        )
+
+        report["run_id"] = "previous-run"
+
+        self.report_path.write_text(
+            json.dumps(report),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ValueError):
+            self.verify_published()
+
+    def test_verifier_rejects_missing_processed_page(self):
+        self.process()
+
+        path = self.processed_dir / (
+            page_id(self.urls[1]) + ".md"
+        )
+
+        path.unlink()
+
+        with self.assertRaises(ValueError):
+            self.verify_published()
+
+
 if __name__ == "__main__":
     unittest.main()
