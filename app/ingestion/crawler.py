@@ -423,6 +423,22 @@ async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
 
     urls = prepare_urls(urls_data, limit=MAX_PAGES, scope=active_scope)
     pages_dir.mkdir(parents=True, exist_ok=True)
+
+    from uuid import uuid4
+
+    run_id = uuid4().hex
+    manifest_path = pages_dir.parent / "crawl_manifest.json"
+    outcomes = []
+
+    # Write a new manifest before crawling. An interrupted run must
+    # never leave the previous run marked as the current complete run.
+    _save_json(manifest_path, {
+        "run_id": run_id,
+        "expected_urls": urls,
+        "status": "running",
+        "pages": [],
+    })
+
     successful = failed = 0
 
     print(f"Starting crawl of {len(urls)} pages")
@@ -458,16 +474,47 @@ async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
                         "content_hash": hashlib.sha256(
                             content.encode("utf-8")
                         ).hexdigest(),
+                        "run_id": run_id,
                     },
                 )
+
+                outcomes.append({
+                    "run_id": run_id,
+                    "source_url": url,
+                    "status": "success",
+                    "final_url": final_url,
+                })
+
                 successful += 1
                 print(f"Saved: {len(content)} characters")
             except Exception as exc:
                 failed += 1
+
+                outcomes.append({
+                    "run_id": run_id,
+                    "source_url": url,
+                    "status": "failed",
+                    "error_type": type(exc).__name__,
+                })
+
                 print(f"Failed: {exc}")
 
             if index < len(urls):
                 await asyncio.sleep(REQUEST_DELAY)
+
+    _save_json(manifest_path, {
+        "run_id": run_id,
+        "expected_urls": urls,
+        "status": (
+            "complete"
+            if urls and failed == 0 and successful == len(urls)
+            else "incomplete"
+        ),
+        "pages": outcomes,
+        "attempted": len(urls),
+        "successful": successful,
+        "failed": failed,
+    })
 
     print("\n" + "=" * 45)
     print("CRAWLING SUMMARY")

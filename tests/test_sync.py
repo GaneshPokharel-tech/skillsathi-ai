@@ -875,3 +875,114 @@ class TestPageRefreshWorkflow(unittest.TestCase):
         self.assertTrue(
             self.client.collection_exists("workflow_v2")
         )
+
+
+
+class TestCrawlCompleteness(unittest.TestCase):
+
+    RUN = "refresh-test-001"
+    URLS = [
+        "https://skillshikshya.com/courses/course-a",
+        "https://skillshikshya.com/courses/course-b",
+    ]
+
+    def records(self):
+        crawl = [
+            {
+                "run_id": self.RUN,
+                "source_url": url,
+                "status": "success",
+            }
+            for url in self.URLS
+        ]
+
+        processed = [
+            {
+                "run_id": self.RUN,
+                "source_url": url,
+                "status": "processed",
+                "content_hash": "a" * 64,
+                "cleaned_character_count": 120,
+            }
+            for url in self.URLS
+        ]
+
+        return crawl, processed
+
+    def validate(self, **overrides):
+        from app.ingestion.sync import validate_crawl_snapshot
+
+        crawl, processed = self.records()
+
+        arguments = {
+            "run_id": self.RUN,
+            "expected_urls": self.URLS,
+            "crawled_pages": crawl,
+            "processed_pages": processed,
+        }
+
+        arguments.update(overrides)
+
+        return validate_crawl_snapshot(**arguments)
+
+    def test_complete_selected_batch_is_accepted(self):
+        result = self.validate()
+
+        self.assertEqual(result["status"], "complete")
+        self.assertEqual(result["validated_pages"], 2)
+
+    def test_missing_crawled_page_is_rejected(self):
+        crawl, _ = self.records()
+
+        with self.assertRaises(ValueError):
+            self.validate(crawled_pages=crawl[:1])
+
+    def test_failed_crawl_is_rejected(self):
+        crawl, _ = self.records()
+        crawl[1]["status"] = "failed"
+
+        with self.assertRaises(ValueError):
+            self.validate(crawled_pages=crawl)
+
+    def test_missing_processed_page_is_rejected(self):
+        _, processed = self.records()
+
+        with self.assertRaises(ValueError):
+            self.validate(processed_pages=processed[:1])
+
+    def test_skipped_processing_is_rejected(self):
+        _, processed = self.records()
+        processed[0]["status"] = "skipped"
+
+        with self.assertRaises(ValueError):
+            self.validate(processed_pages=processed)
+
+    def test_previous_run_records_are_rejected(self):
+        crawl, _ = self.records()
+        crawl[0]["run_id"] = "previous-run"
+
+        with self.assertRaises(ValueError):
+            self.validate(crawled_pages=crawl)
+
+    def test_invalid_cleaned_content_is_rejected(self):
+        _, processed = self.records()
+        processed[0]["cleaned_character_count"] = 0
+
+        with self.assertRaises(ValueError):
+            self.validate(processed_pages=processed)
+
+    def test_duplicate_expected_urls_are_rejected(self):
+        with self.assertRaises(ValueError):
+            self.validate(
+                expected_urls=[self.URLS[0], self.URLS[0]]
+            )
+
+    def test_unexpected_crawled_page_is_rejected(self):
+        crawl, _ = self.records()
+
+        crawl[1]["source_url"] = (
+            "https://skillshikshya.com/courses/unknown"
+        )
+
+        with self.assertRaises(ValueError):
+            self.validate(crawled_pages=crawl)

@@ -644,3 +644,342 @@ def refresh_page_snapshot(
         "updated_chunks": built["updated_chunks"],
         "removed_chunks": built["removed_chunks"],
     }
+
+
+
+def validate_crawl_snapshot(
+    *,
+    run_id: str,
+    expected_urls: list[str],
+    crawled_pages: list[dict],
+    processed_pages: list[dict],
+) -> dict:
+    """Validate coverage of a single approved crawl batch.
+
+    Expected URLs are the selected crawl targets, not necessarily every
+    URL discovered on the website.
+
+    This function does not read files or modify Qdrant. Each record
+    must belong to the same uniquely identified crawl run.
+    """
+    import re
+
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("A crawl run ID is required.")
+
+    if not isinstance(expected_urls, list) or not expected_urls:
+        raise ValueError("Expected crawl URLs cannot be empty.")
+
+    if any(
+        not isinstance(url, str) or not url.strip()
+        for url in expected_urls
+    ):
+        raise ValueError("Invalid expected URL.")
+
+    expected = set(expected_urls)
+
+    if len(expected) != len(expected_urls):
+        raise ValueError("Duplicate expected URLs.")
+
+    def validate_records(records, *, stage, success_status):
+        if not isinstance(records, list):
+            raise ValueError(f"Invalid {stage} records.")
+
+        seen = set()
+
+        for record in records:
+            if not isinstance(record, dict):
+                raise ValueError(f"Invalid {stage} record.")
+
+            url = record.get("source_url")
+
+            if (
+                not isinstance(url, str)
+                or url not in expected
+                or url in seen
+            ):
+                raise ValueError(
+                    f"Unexpected or duplicate {stage} URL."
+                )
+
+            seen.add(url)
+
+            if record.get("run_id") != run_id:
+                raise ValueError(
+                    f"{stage} record belongs to another run."
+                )
+
+            if record.get("status") != success_status:
+                raise ValueError(
+                    f"{stage} did not succeed for {url}."
+                )
+
+            if stage == "processing":
+                digest = record.get("content_hash")
+                characters = record.get("cleaned_character_count")
+
+                if (
+                    not isinstance(digest, str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                    or isinstance(characters, bool)
+                    or not isinstance(characters, int)
+                    or characters <= 0
+                ):
+                    raise ValueError(
+                        f"Invalid cleaned content for {url}."
+                    )
+
+        if seen != expected:
+            raise ValueError(
+                f"Incomplete {stage} coverage: "
+                f"{len(seen)}/{len(expected)} pages."
+            )
+
+    validate_records(
+        crawled_pages,
+        stage="crawl",
+        success_status="success",
+    )
+
+    validate_records(
+        processed_pages,
+        stage="processing",
+        success_status="processed",
+    )
+
+    return {
+        "status": "complete",
+        "run_id": run_id,
+        "validated_pages": len(expected),
+        "validated_urls": sorted(expected),
+    }
+
+
+
+def process_crawl_run(
+    *,
+    manifest_path,
+    raw_pages_dir,
+    processed_pages_dir,
+    report_path,
+    scope=None,
+) -> dict:
+    """Process only verified pages belonging to one complete crawl run.
+
+    All selected pages are validated before processing. Processed
+    files are staged before publication. Qdrant is never modified.
+    """
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from app.ingestion.crawler import (
+        normalize_content_url,
+        page_id,
+    )
+    from app.ingestion.processor import _process_page
+
+    manifest_path = Path(manifest_path)
+    raw_pages_dir = Path(raw_pages_dir)
+    processed_pages_dir = Path(processed_pages_dir)
+    report_path = Path(report_path)
+
+    manifest = json.loads(
+        manifest_path.read_text(encoding="utf-8")
+    )
+
+    if not isinstance(manifest, dict):
+        raise ValueError("Crawl manifest must be an object.")
+
+    run_id = manifest.get("run_id")
+    expected_urls = manifest.get("expected_urls")
+    crawl_records = manifest.get("pages")
+
+    if not isinstance(run_id, str) or not run_id.strip():
+        raise ValueError("Missing crawl run ID.")
+
+    if (
+        not isinstance(expected_urls, list)
+        or not expected_urls
+        or any(
+            not isinstance(url, str) or not url.strip()
+            for url in expected_urls
+        )
+        or len(set(expected_urls)) != len(expected_urls)
+    ):
+        raise ValueError("Invalid expected crawl URLs.")
+
+    if (
+        manifest.get("status") != "complete"
+        or manifest.get("attempted") != len(expected_urls)
+        or manifest.get("successful") != len(expected_urls)
+        or manifest.get("failed") != 0
+        or not isinstance(crawl_records, list)
+        or len(crawl_records) != len(expected_urls)
+    ):
+        raise ValueError("Crawl run is not complete.")
+
+    records_by_url = {}
+
+    for record in crawl_records:
+        if not isinstance(record, dict):
+            raise ValueError("Invalid crawl record.")
+
+        url = record.get("source_url")
+
+        if (
+            url not in expected_urls
+            or url in records_by_url
+            or record.get("run_id") != run_id
+            or record.get("status") != "success"
+            or record.get("final_url") != url
+        ):
+            raise ValueError("Invalid or stale crawl record.")
+
+        records_by_url[url] = record
+
+    if set(records_by_url) != set(expected_urls):
+        raise ValueError("Crawl page coverage is incomplete.")
+
+    selected_pages = []
+
+    # Preflight every selected raw page before writing anything.
+    for url in expected_urls:
+        approved = normalize_content_url(url, scope=scope)
+
+        if approved != url:
+            raise ValueError("Unapproved or noncanonical page URL.")
+
+        identifier = page_id(url)
+        markdown_path = raw_pages_dir / f"{identifier}.md"
+        metadata_path = raw_pages_dir / f"{identifier}.json"
+
+        if not markdown_path.is_file() or not metadata_path.is_file():
+            raise ValueError(
+                f"Missing selected raw page or metadata: {url}"
+            )
+
+        metadata = json.loads(
+            metadata_path.read_text(encoding="utf-8")
+        )
+
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("run_id") != run_id
+            or metadata.get("source_url") != url
+        ):
+            raise ValueError("Raw page metadata belongs to another run.")
+
+        raw = markdown_path.read_bytes()
+
+        if not raw.strip():
+            raise ValueError("Empty raw page content.")
+
+        if (
+            "content_hash" in metadata
+            and metadata["content_hash"]
+            != hashlib.sha256(raw).hexdigest()
+        ):
+            raise ValueError("Raw page content hash mismatch.")
+
+        selected_pages.append((url, markdown_path))
+
+    with TemporaryDirectory(prefix="skillsathi-processing-") as directory:
+        staging_dir = Path(directory)
+        processed_records = []
+
+        for url, markdown_path in selected_pages:
+            result = _process_page(
+                markdown_path,
+                scope=scope,
+                output_dir=staging_dir,
+            )
+
+            if result["status"] != "processed":
+                raise ValueError(
+                    f"Page processing failed for {url}."
+                )
+
+            identifier = page_id(url)
+
+            cleaned_path = staging_dir / f"{identifier}.md"
+            cleaned_metadata_path = staging_dir / f"{identifier}.json"
+
+            cleaned = cleaned_path.read_bytes()
+
+            cleaned_metadata = json.loads(
+                cleaned_metadata_path.read_text(encoding="utf-8")
+            )
+
+            digest = hashlib.sha256(cleaned).hexdigest()
+
+            if (
+                cleaned_metadata.get("run_id") != run_id
+                or cleaned_metadata.get("source_url") != url
+                or cleaned_metadata.get("content_hash") != digest
+                or not cleaned.strip()
+            ):
+                raise ValueError("Invalid processed page metadata.")
+
+            processed_records.append({
+                "run_id": run_id,
+                "source_url": url,
+                "status": "processed",
+                "file": markdown_path.name,
+                "content_hash": digest,
+                "cleaned_character_count": len(
+                    cleaned.decode("utf-8")
+                ),
+            })
+
+        # Final validation before publishing processed files.
+        validate_crawl_snapshot(
+            run_id=run_id,
+            expected_urls=expected_urls,
+            crawled_pages=crawl_records,
+            processed_pages=processed_records,
+        )
+
+        report = {
+            "run_id": run_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "processed": len(processed_records),
+            "skipped": 0,
+            "failed": 0,
+            "pages": processed_records,
+        }
+
+        processed_pages_dir.mkdir(parents=True, exist_ok=True)
+
+        for url, _ in selected_pages:
+            identifier = page_id(url)
+
+            for extension in (".md", ".json"):
+                filename = identifier + extension
+
+                destination = processed_pages_dir / filename
+                temporary = processed_pages_dir / (
+                    filename + "." + run_id + ".tmp"
+                )
+
+                temporary.write_bytes(
+                    (staging_dir / filename).read_bytes()
+                )
+                temporary.replace(destination)
+
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+
+        temporary_report = report_path.with_name(
+            report_path.name + "." + run_id + ".tmp"
+        )
+
+        temporary_report.write_text(
+            json.dumps(report, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        temporary_report.replace(report_path)
+
+    return report
