@@ -74,3 +74,11 @@ def refresh_lock(lock_path):
 
     finally:
         os.close(descriptor)
+
+
+
+from pathlib import Path
+
+DEFAULT_REFRESH_LOCK_PATH = (
+    Path(__file__).resolve().parents[2] / "data" / "refresh.lock"
+)

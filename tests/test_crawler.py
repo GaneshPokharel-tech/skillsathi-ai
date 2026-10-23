@@ -1,3 +1,6 @@
+
+from pathlib import Path as _CrawlerTestPath
+from tempfile import TemporaryDirectory as _CrawlerTestLockDirectory
 import unittest
 
 from app.ingestion.crawler import validate_public_url
@@ -178,7 +181,8 @@ class TestScopedCrawlExecution(unittest.IsolatedAsyncioTestCase):
                 patch.object(crawler, "OUTPUT_DIR", output),
                 patch.object(crawler, "URLS_FILE", links_file),
             ):
-                await crawler.crawl_homepage(scope=scope)
+                with _CrawlerTestLockDirectory() as _lock_dir:
+                    await crawler.crawl_homepage(scope=scope, lock_path=_CrawlerTestPath(_lock_dir) / 'refresh.lock')
 
             discovered = json.loads(
                 links_file.read_text(encoding="utf-8")
@@ -243,7 +247,8 @@ class TestScopedPageExecution(unittest.IsolatedAsyncioTestCase):
                 patch.object(crawler, "PAGES_DIR", pages_dir),
                 patch.object(crawler, "REQUEST_DELAY", 0),
             ):
-                await crawler.crawl_pages(scope=scope)
+                with _CrawlerTestLockDirectory() as _lock_dir:
+                    await crawler.crawl_pages(scope=scope, lock_path=_CrawlerTestPath(_lock_dir) / 'refresh.lock')
 
             saved_pages = list(pages_dir.glob("*.json"))
 
@@ -357,7 +362,8 @@ class TestDNSPreflightEnforcement(unittest.IsolatedAsyncioTestCase):
                 patch.object(crawler, "AsyncWebCrawler") as browser,
             ):
                 with self.assertRaisesRegex(ValueError, "Unsafe DNS"):
-                    await crawler.crawl_homepage(scope=scope)
+                    with _CrawlerTestLockDirectory() as _lock_dir:
+                        await crawler.crawl_homepage(scope=scope, lock_path=_CrawlerTestPath(_lock_dir) / 'refresh.lock')
 
                 dns_check.assert_called_once_with(scope)
                 browser.assert_not_called()
@@ -390,7 +396,8 @@ class TestDNSPreflightEnforcement(unittest.IsolatedAsyncioTestCase):
                 patch.object(crawler, "AsyncWebCrawler") as browser,
             ):
                 with self.assertRaisesRegex(ValueError, "Unsafe DNS"):
-                    await crawler.crawl_pages(scope=scope)
+                    with _CrawlerTestLockDirectory() as _lock_dir:
+                        await crawler.crawl_pages(scope=scope, lock_path=_CrawlerTestPath(_lock_dir) / 'refresh.lock')
 
                 dns_check.assert_called_once_with(scope)
                 browser.assert_not_called()
@@ -645,7 +652,8 @@ class TestScopedCrawlerStorage(unittest.IsolatedAsyncioTestCase):
                     crawler, "AsyncWebCrawler", return_value=browser
                 ),
             ):
-                await crawler.crawl_homepage(scope=scope)
+                with _CrawlerTestLockDirectory() as _lock_dir:
+                    await crawler.crawl_homepage(scope=scope, lock_path=_CrawlerTestPath(_lock_dir) / 'refresh.lock')
 
             site_dir = raw_root / "example.org"
 

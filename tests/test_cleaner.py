@@ -1,3 +1,6 @@
+
+from pathlib import Path as _CrawlerTestPath
+from tempfile import TemporaryDirectory as _CrawlerTestLockDirectory
 import hashlib
 import json
 import tempfile
@@ -372,8 +375,10 @@ class TestScopedIngestionPipeline(IsolatedAsyncioTestCase):
                     processed_root / "legacy_report.json"
                 ),
             ):
-                await crawler.crawl_homepage(scope=scope)
-                await crawler.crawl_pages(scope=scope)
+                with _CrawlerTestLockDirectory() as _lock_dir:
+                    await crawler.crawl_homepage(scope=scope, lock_path=_CrawlerTestPath(_lock_dir) / 'refresh.lock')
+                with _CrawlerTestLockDirectory() as _lock_dir:
+                    await crawler.crawl_pages(scope=scope, lock_path=_CrawlerTestPath(_lock_dir) / 'refresh.lock')
                 report = processor.clean_pages(scope=scope)
 
             page_name = crawler.page_id(

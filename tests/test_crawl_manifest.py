@@ -1,5 +1,8 @@
 """Crawl-run manifest integration tests using a mocked browser."""
 
+from pathlib import Path as _CrawlerTestPath
+from tempfile import TemporaryDirectory as _CrawlerTestLockDirectory
+
 import json
 import unittest
 from pathlib import Path
@@ -73,7 +76,8 @@ class TestCrawlRunManifest(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(crawler, "REQUEST_DELAY", 0),
         ):
-            await crawler.crawl_pages()
+            with _CrawlerTestLockDirectory() as _lock_dir:
+                await crawler.crawl_pages(lock_path=_CrawlerTestPath(_lock_dir) / 'refresh.lock')
 
         return json.loads(
             (self.root / "crawl_manifest.json").read_text(
@@ -151,6 +155,117 @@ class TestCrawlRunManifest(unittest.IsolatedAsyncioTestCase):
             old_metadata["run_id"],
             second["run_id"],
         )
+
+
+
+
+class TestCrawlerRefreshLock(unittest.IsolatedAsyncioTestCase):
+    """Crawler writes must coordinate with processing and activation."""
+
+    async def asyncSetUp(self):
+        from tempfile import TemporaryDirectory
+
+        self.temp = TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+
+        self.root = Path(self.temp.name)
+        self.lock_path = self.root / "refresh.lock"
+        self.pages_dir = self.root / "pages"
+        self.urls_file = self.root / "discovered_urls.json"
+
+        self.urls_file.write_text(
+            json.dumps([
+                "https://skillshikshya.com/courses/test-course"
+            ]),
+            encoding="utf-8",
+        )
+
+    def guard(self):
+        """Prevent live browser, DNS and website access."""
+        from contextlib import ExitStack
+
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+
+        for name in (
+            "validate_public_url",
+            "validate_dns_scope",
+        ):
+            stack.enter_context(
+                patch.object(crawler, name)
+            )
+
+        stack.enter_context(
+            patch.object(
+                crawler, "URLS_FILE", self.urls_file
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                crawler, "PAGES_DIR", self.pages_dir
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                crawler, "OUTPUT_DIR", self.root
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                crawler,
+                "prepare_urls",
+                return_value=[
+                    "https://skillshikshya.com/courses/test-course"
+                ],
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                crawler,
+                "AsyncWebCrawler",
+                side_effect=AssertionError(
+                    "Browser must not start without a refresh lock."
+                ),
+            )
+        )
+
+    async def test_pages_require_shared_lock_path(self):
+        self.guard()
+
+        with self.assertRaisesRegex(ValueError, "(?i)lock"):
+            await crawler.crawl_pages()
+
+    async def test_pages_reject_busy_lock_before_browser(self):
+        from app.ingestion.locking import refresh_lock
+
+        self.guard()
+
+        with refresh_lock(self.lock_path):
+            with self.assertRaisesRegex(
+                RuntimeError, "(?i)lock|refresh|busy"
+            ):
+                await crawler.crawl_pages(
+                    lock_path=self.lock_path
+                )
+
+    async def test_homepage_requires_shared_lock_path(self):
+        self.guard()
+
+        with self.assertRaisesRegex(ValueError, "(?i)lock"):
+            await crawler.crawl_homepage()
+
+    async def test_homepage_rejects_busy_lock_before_browser(self):
+        from app.ingestion.locking import refresh_lock
+
+        self.guard()
+
+        with refresh_lock(self.lock_path):
+            with self.assertRaisesRegex(
+                RuntimeError, "(?i)lock|refresh|busy"
+            ):
+                await crawler.crawl_homepage(
+                    lock_path=self.lock_path
+                )
 
 
 if __name__ == "__main__":

@@ -342,7 +342,7 @@ def _run_config(*, content_only: bool) -> CrawlerRunConfig:
     return CrawlerRunConfig(**options)
 
 
-async def crawl_homepage(*, scope: CrawlScope | None = None) -> None:
+async def _crawl_homepage_locked(*, scope: CrawlScope | None = None) -> None:
     """Crawl homepage, save Markdown/metadata, discover allowed content URLs."""
     active_scope = scope or CrawlScope(
         base_url=BASE_URL,
@@ -397,7 +397,7 @@ async def crawl_homepage(*, scope: CrawlScope | None = None) -> None:
     print(f"Discovered URLs saved: {links_path}")
 
 
-async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
+async def _crawl_pages_locked(*, scope: CrawlScope | None = None) -> None:
     """Crawl the top approved pages sequentially and save content/metadata."""
     active_scope = scope or CrawlScope(
         base_url=BASE_URL,
@@ -525,7 +525,48 @@ async def crawl_pages(*, scope: CrawlScope | None = None) -> None:
     print(f"Output directory: {pages_dir}")
 
 
+
+
+def _crawler_refresh_lock_path(lock_path):
+    """Validate the coordination path before crawler I/O."""
+    from pathlib import Path
+
+    if lock_path is None:
+        raise ValueError("A shared refresh lock path is required.")
+
+    try:
+        path = Path(lock_path)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid refresh lock path.") from exc
+
+    if not path.is_absolute():
+        raise ValueError("Refresh lock path must be absolute.")
+
+    return path
+
+
+async def crawl_homepage(*, scope: CrawlScope | None = None, lock_path=None) -> None:
+    """Crawl homepage while holding the shared refresh lock."""
+    from app.ingestion.locking import refresh_lock
+
+    path = _crawler_refresh_lock_path(lock_path)
+
+    with refresh_lock(path):
+        await _crawl_homepage_locked(scope=scope)
+
+
+async def crawl_pages(*, scope: CrawlScope | None = None, lock_path=None) -> None:
+    """Crawl selected pages while holding the shared refresh lock."""
+    from app.ingestion.locking import refresh_lock
+
+    path = _crawler_refresh_lock_path(lock_path)
+
+    with refresh_lock(path):
+        await _crawl_pages_locked(scope=scope)
+
 def main() -> None:
+    from app.ingestion.locking import DEFAULT_REFRESH_LOCK_PATH
+
     parser = argparse.ArgumentParser(description="SkillSathi website ingestion")
     parser.add_argument(
         "--pages", action="store_true", help="Crawl discovered pages (default: homepage)"
@@ -540,9 +581,9 @@ def main() -> None:
     scope = build_crawl_scope(args.url) if args.url else None
 
     asyncio.run(
-        crawl_pages(scope=scope)
+        crawl_pages(scope=scope, lock_path=DEFAULT_REFRESH_LOCK_PATH)
         if args.pages
-        else crawl_homepage(scope=scope)
+        else crawl_homepage(scope=scope, lock_path=DEFAULT_REFRESH_LOCK_PATH)
     )
 
 
