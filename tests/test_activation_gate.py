@@ -355,5 +355,131 @@ class TestMandatoryActivationGate(unittest.TestCase):
         self.assertEqual(self.active_collection(), "gate_v1")
 
 
+    def prepare_copied_course_snapshot(
+        self,
+        *,
+        tamper_payload=False,
+        omit_copied=False,
+        tamper_vector=False,
+    ):
+        """Prepare verified source page plus an unverified copied page."""
+        from app.rag.engine import index_chunks
+
+        other_url = (
+            "https://skillshikshya.com/courses/other-course"
+        )
+
+        other_chunks = chunk_markdown(
+            "# Other Course\n"
+            "## Curriculum\n"
+            "Learn cybersecurity fundamentals.\n",
+            source_url=other_url,
+        )
+
+        self.assertTrue(other_chunks)
+
+        index_chunks(
+            self.client,
+            collection_name="gate_v1",
+            chunks=other_chunks,
+            vectors=[[1.0, 0.0, 0.0] for _ in other_chunks],
+        )
+
+        self.client.create_collection(
+            collection_name="gate_v2",
+            vectors_config=models.VectorParams(
+                size=3,
+                distance=models.Distance.COSINE,
+            ),
+        )
+
+        staged_chunks = list(self.original_chunks)
+
+        if not omit_copied:
+            for chunk in other_chunks:
+                staged_chunks.append(
+                    {
+                        **chunk,
+                        "text": (
+                            "Fabricated copied course curriculum."
+                            if tamper_payload
+                            else chunk["text"]
+                        ),
+                    }
+                )
+
+        vectors = [
+            (
+                [0.0, 1.0, 0.0]
+                if tamper_vector
+                and chunk["source_url"] == other_url
+                else [1.0, 0.0, 0.0]
+            )
+            for chunk in staged_chunks
+        ]
+
+        index_chunks(
+            self.client,
+            collection_name="gate_v2",
+            chunks=staged_chunks,
+            vectors=vectors,
+        )
+
+        proof = self.published_proof(
+            "# Test Course\n"
+            "## Curriculum\n"
+            "Learn SQL fundamentals.\n"
+        )
+
+        return {
+            "alias_name": "gate_active",
+            "expected_active_collection": "gate_v1",
+            "staged_collection": "gate_v2",
+            "expected_chunk_ids": [
+                chunk["chunk_id"] for chunk in staged_chunks
+            ],
+            **proof,
+        }
+
+    def test_rejects_tampered_copied_course_payload(self):
+        arguments = self.prepare_copied_course_snapshot(
+            tamper_payload=True,
+        )
+
+        with self.assertRaises(ValueError):
+            activate_collection_snapshot(
+                self.client,
+                **arguments,
+            )
+
+        self.assertEqual(self.active_collection(), "gate_v1")
+
+    def test_rejects_missing_copied_course(self):
+        arguments = self.prepare_copied_course_snapshot(
+            omit_copied=True,
+        )
+
+        with self.assertRaises(ValueError):
+            activate_collection_snapshot(
+                self.client,
+                **arguments,
+            )
+
+        self.assertEqual(self.active_collection(), "gate_v1")
+
+    def test_rejects_changed_copied_course_vector(self):
+        arguments = self.prepare_copied_course_snapshot(
+            tamper_vector=True,
+        )
+
+        with self.assertRaises(ValueError):
+            activate_collection_snapshot(
+                self.client,
+                **arguments,
+            )
+
+        self.assertEqual(self.active_collection(), "gate_v1")
+
+
 if __name__ == "__main__":
     unittest.main()

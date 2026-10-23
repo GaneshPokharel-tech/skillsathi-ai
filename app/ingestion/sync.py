@@ -387,6 +387,49 @@ def activate_collection_snapshot(
             "Staged snapshot does not match approved chunk manifest."
         )
 
+    def read_unverified_points(collection_name):
+        """Read points belonging to pages outside the verified batch."""
+        copied = {}
+        offset = None
+
+        while True:
+            records, offset = client.scroll(
+                collection_name=collection_name,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=True,
+            )
+
+            for record in records:
+                payload = record.payload or {}
+
+                if payload.get("source_url") in verified_urls:
+                    continue
+
+                identifier = str(record.id)
+                copied[identifier] = {
+                    "payload": payload,
+                    "vector": record.vector,
+                }
+
+            if offset is None:
+                break
+
+        return copied
+
+    original_copied = read_unverified_points(
+        expected_active_collection
+    )
+    staged_copied = read_unverified_points(
+        staged_collection
+    )
+
+    if original_copied != staged_copied:
+        raise ValueError(
+            "Copied course points differ from the active collection."
+        )
+
     client.update_collection_aliases(
         change_aliases_operations=[
             models.DeleteAliasOperation(

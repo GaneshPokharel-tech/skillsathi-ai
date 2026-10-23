@@ -522,12 +522,30 @@ class TestSnapshotActivation(unittest.TestCase):
                     for chunk in self.new_chunks
                 ]
             else:
+                self.old_markdown = (
+                    "# Snapshot Course\n"
+                    "## Curriculum\n"
+                    "Learn SQL fundamentals.\n"
+                )
+                self.old_chunks = chunk_markdown(
+                    self.old_markdown,
+                    source_url=SOURCE,
+                )
                 points = [
                     models.PointStruct(
-                        id=identifier,
+                        id=chunk["chunk_id"],
                         vector=[1.0, 0.0, 0.0],
-                        payload={"generation": generation},
+                        payload={
+                            key: chunk[key]
+                            for key in (
+                                "source_url",
+                                "document_title",
+                                "section",
+                                "text",
+                            )
+                        },
                     )
+                    for chunk in self.old_chunks
                 ]
 
             self.client.upsert(
@@ -556,7 +574,12 @@ class TestSnapshotActivation(unittest.TestCase):
             limit=10,
             with_payload=True,
         )[0]
-        return records[0].payload.get("generation", "new")
+        text = records[0].payload["text"]
+        if "Python fundamentals" in text:
+            return "new"
+        if "SQL fundamentals" in text:
+            return "old"
+        raise AssertionError("Unexpected snapshot course content.")
 
     def activate(self, **overrides):
         from app.ingestion.sync import activate_collection_snapshot
@@ -600,9 +623,9 @@ class TestSnapshotActivation(unittest.TestCase):
             with_payload=True,
         )[0]
 
-        self.assertEqual(
-            old_records[0].payload["generation"],
-            "old",
+        self.assertIn(
+            "SQL fundamentals",
+            old_records[0].payload["text"],
         )
 
     def test_incomplete_snapshot_never_activates(self):
