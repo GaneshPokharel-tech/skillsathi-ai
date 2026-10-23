@@ -931,7 +931,7 @@ def validate_crawl_snapshot(
 
 
 
-def process_crawl_run(
+def _process_crawl_run_locked(
     *,
     manifest_path,
     raw_pages_dir,
@@ -1524,4 +1524,38 @@ def refresh_page_snapshot(
             manifest_path=manifest_path,
             processed_pages_dir=processed_pages_dir,
             report_path=report_path,
+        )
+
+
+
+def process_crawl_run(
+    *,
+    manifest_path,
+    raw_pages_dir,
+    processed_pages_dir,
+    report_path,
+    scope=None,
+    lock_path=None,
+) -> dict:
+    """Process and publish one crawl run under a shared process lock.
+
+    All cooperating content writers must use the same lock path.
+    The lock covers validation, processing, and publication.
+    """
+    from app.ingestion.locking import refresh_lock
+
+    path = _require_refresh_lock_path(
+        lock_path=lock_path,
+        manifest_path=manifest_path,
+        processed_pages_dir=processed_pages_dir,
+        report_path=report_path,
+    )
+
+    with refresh_lock(path):
+        return _process_crawl_run_locked(
+            manifest_path=manifest_path,
+            raw_pages_dir=raw_pages_dir,
+            processed_pages_dir=processed_pages_dir,
+            report_path=report_path,
+            scope=scope,
         )

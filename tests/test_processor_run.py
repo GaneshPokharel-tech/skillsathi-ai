@@ -93,6 +93,7 @@ class TestManifestBoundProcessing(unittest.TestCase):
             raw_pages_dir=self.raw_dir,
             processed_pages_dir=self.processed_dir,
             report_path=self.report_path,
+            lock_path=self.manifest_path.parent / "refresh.lock",
         )
 
     def test_processes_only_selected_manifest_pages(self):
@@ -265,6 +266,42 @@ class TestManifestBoundProcessing(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.verify_published()
+
+
+    def test_processing_rejects_busy_refresh_lock(self):
+        from app.ingestion.locking import refresh_lock
+
+        lock_path = self.manifest_path.parent / "refresh.lock"
+
+        with refresh_lock(lock_path):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "(?i)lock|refresh|busy",
+            ):
+                sync.process_crawl_run(
+                    manifest_path=self.manifest_path,
+                    raw_pages_dir=self.raw_dir,
+                    processed_pages_dir=self.processed_dir,
+                    report_path=self.report_path,
+                    lock_path=lock_path,
+                )
+
+        self.assertFalse(self.report_path.exists())
+        self.assertFalse(self.processed_dir.exists())
+
+    def test_processing_requires_shared_lock_path(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "(?i)lock",
+        ):
+            sync.process_crawl_run(
+                manifest_path=self.manifest_path,
+                raw_pages_dir=self.raw_dir,
+                processed_pages_dir=self.processed_dir,
+                report_path=self.report_path,
+            )
+
+        self.assertFalse(self.report_path.exists())
 
 
 if __name__ == "__main__":
