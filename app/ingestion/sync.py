@@ -1126,36 +1126,106 @@ def _process_crawl_run_locked(
             "pages": processed_records,
         }
 
-        processed_pages_dir.mkdir(parents=True, exist_ok=True)
+
+        # Snapshot prior contents before changing published files.
+        # This supports rollback of recoverable publication errors.
+        previous_published_bytes = {}
 
         for url, _ in selected_pages:
             identifier = page_id(url)
 
             for extension in (".md", ".json"):
-                filename = identifier + extension
-
-                destination = processed_pages_dir / filename
-                temporary = processed_pages_dir / (
-                    filename + "." + run_id + ".tmp"
+                destination = (
+                    processed_pages_dir / (identifier + extension)
+                )
+                previous_published_bytes[destination] = (
+                    destination.read_bytes()
+                    if destination.is_file()
+                    else None
                 )
 
-                temporary.write_bytes(
-                    (staging_dir / filename).read_bytes()
-                )
-                temporary.replace(destination)
-
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-
-        temporary_report = report_path.with_name(
-            report_path.name + "." + run_id + ".tmp"
+        previous_published_bytes[report_path] = (
+            report_path.read_bytes()
+            if report_path.is_file()
+            else None
         )
 
-        temporary_report.write_text(
-            json.dumps(report, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        try:
+            processed_pages_dir.mkdir(parents=True, exist_ok=True)
 
-        temporary_report.replace(report_path)
+            for url, _ in selected_pages:
+                identifier = page_id(url)
+
+                for extension in (".md", ".json"):
+                    filename = identifier + extension
+
+                    destination = processed_pages_dir / filename
+                    temporary = processed_pages_dir / (
+                        filename + "." + run_id + ".tmp"
+                    )
+
+                    temporary.write_bytes(
+                        (staging_dir / filename).read_bytes()
+                    )
+                    temporary.replace(destination)
+
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+
+            temporary_report = report_path.with_name(
+                report_path.name + "." + run_id + ".tmp"
+            )
+
+            temporary_report.write_text(
+                json.dumps(report, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            temporary_report.replace(report_path)
+
+        except Exception:
+            import os
+            from tempfile import NamedTemporaryFile
+
+            rollback_errors = []
+
+            for destination, previous in previous_published_bytes.items():
+                try:
+                    if previous is None:
+                        destination.unlink(missing_ok=True)
+                        continue
+
+                    if (
+                        destination.is_file()
+                        and destination.read_bytes() == previous
+                    ):
+                        continue
+
+                    # Restore through a temporary file in the same
+                    # directory so each replacement is atomic.
+                    with NamedTemporaryFile(
+                        mode="wb",
+                        dir=destination.parent,
+                        prefix=".snapshot-rollback-",
+                        delete=False,
+                    ) as handle:
+                        handle.write(previous)
+                        recovery_path = Path(handle.name)
+
+                    try:
+                        os.replace(recovery_path, destination)
+                    finally:
+                        recovery_path.unlink(missing_ok=True)
+
+                except Exception as recovery_error:
+                    rollback_errors.append(recovery_error)
+
+            if rollback_errors:
+                raise RuntimeError(
+                    "Snapshot publication failed and rollback "
+                    "was incomplete. Manual recovery is required."
+                ) from rollback_errors[0]
+
+            raise
 
     return report
 

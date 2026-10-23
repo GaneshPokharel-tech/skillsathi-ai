@@ -304,5 +304,123 @@ class TestManifestBoundProcessing(unittest.TestCase):
         self.assertFalse(self.report_path.exists())
 
 
+
+    def test_interrupted_publication_preserves_previous_snapshot(self):
+        """A failed refresh must not damage the last complete snapshot."""
+        import hashlib
+        import json
+        from unittest.mock import patch
+
+        from app.ingestion.crawler import page_id
+
+        # First, publish a fully verified two-course snapshot.
+        self.process()
+
+        proof = {
+            "manifest_path": self.manifest_path,
+            "processed_pages_dir": self.processed_dir,
+            "report_path": self.report_path,
+        }
+
+        verified_before = sync.verify_published_crawl_run(**proof)
+
+        def published_files():
+            return {
+                item.name: item.read_bytes()
+                for item in self.processed_dir.iterdir()
+                if item.is_file()
+                and item.suffix in (".md", ".json")
+            }
+
+        files_before = published_files()
+        report_before = self.report_path.read_bytes()
+
+        # Simulate updated website content for the first course.
+        first_id = page_id(self.urls[0])
+        second_id = page_id(self.urls[1])
+
+        raw_markdown = self.raw_dir / f"{first_id}.md"
+        raw_metadata = self.raw_dir / f"{first_id}.json"
+
+        fresh_bytes = (
+            b"# Updated Course A\\n\\n"
+            b"Learn Python APIs, automated testing, "
+            b"and practical deployment.\\n"
+        )
+
+        raw_markdown.write_bytes(fresh_bytes)
+
+        metadata = json.loads(
+            raw_metadata.read_text(encoding="utf-8")
+        )
+        metadata["content_hash"] = (
+            hashlib.sha256(fresh_bytes).hexdigest()
+        )
+        raw_metadata.write_text(
+            json.dumps(metadata),
+            encoding="utf-8",
+        )
+
+        first_destination = (
+            self.processed_dir / f"{first_id}.md"
+        )
+        second_destination = (
+            self.processed_dir / f"{second_id}.md"
+        )
+
+        original_replace = Path.replace
+        first_published = False
+
+        def interrupt_after_first_page(current, destination):
+            nonlocal first_published
+
+            destination = Path(destination)
+
+            if destination == second_destination:
+                if not first_published:
+                    raise AssertionError(
+                        "Failure occurred before first publication."
+                    )
+                raise OSError(
+                    "simulated publication interruption"
+                )
+
+            result = original_replace(current, destination)
+
+            if destination == first_destination:
+                first_published = True
+
+            return result
+
+        # Controlled failure in temporary test directories only.
+        with patch.object(
+            Path,
+            "replace",
+            new=interrupt_after_first_page,
+        ):
+            with self.assertRaisesRegex(
+                OSError,
+                "simulated publication interruption",
+            ):
+                self.process()
+
+        self.assertTrue(first_published)
+
+        # The previously verified snapshot must remain intact.
+        self.assertEqual(
+            published_files(),
+            files_before,
+            "Failed publication modified the previous snapshot.",
+        )
+        self.assertEqual(
+            self.report_path.read_bytes(),
+            report_before,
+        )
+        self.assertEqual(
+            sync.verify_published_crawl_run(**proof),
+            verified_before,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
