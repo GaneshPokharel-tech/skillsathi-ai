@@ -430,6 +430,48 @@ def activate_collection_snapshot(
             "Copied course points differ from the active collection."
         )
 
+    # Detect changes made while Qdrant validation was running.
+    final_verified = require_verified_crawl_run(
+        manifest_path=manifest_path,
+        processed_pages_dir=processed_pages_dir,
+        report_path=report_path,
+    )
+
+    if final_verified != verified:
+        raise ValueError(
+            "Crawl verification changed during activation."
+        )
+
+    final_chunks = {}
+
+    for page_url in sorted(final_verified["validated_urls"]):
+        chunks = _load_verified_page_chunks(
+            verified=final_verified,
+            source_url=page_url,
+            processed_pages_dir=processed_pages_dir,
+            report_path=report_path,
+        )
+
+        for chunk in chunks:
+            identifier = chunk["chunk_id"]
+
+            if identifier in final_chunks:
+                raise ValueError(
+                    "Duplicate verified chunk during final check."
+                )
+
+            final_chunks[identifier] = {
+                "source_url": chunk["source_url"],
+                "document_title": chunk["document_title"],
+                "section": chunk["section"],
+                "text": chunk["text"],
+            }
+
+    if final_chunks != verified_chunks:
+        raise ValueError(
+            "Published crawl content changed during activation."
+        )
+
     client.update_collection_aliases(
         change_aliases_operations=[
             models.DeleteAliasOperation(

@@ -481,5 +481,94 @@ class TestMandatoryActivationGate(unittest.TestCase):
         self.assertEqual(self.active_collection(), "gate_v1")
 
 
+    def test_rejects_markdown_modified_during_activation(self):
+        """Published content changing mid-validation must block activation."""
+        from pathlib import Path
+        from app.ingestion.crawler import page_id
+
+        markdown = (
+            "# Test Course\n"
+            "## Curriculum\n"
+            "Learn SQL fundamentals.\n"
+        )
+        proof = self.published_proof(markdown)
+
+        self.client.create_collection(
+            collection_name="gate_v2",
+            vectors_config=models.VectorParams(
+                size=3,
+                distance=models.Distance.COSINE,
+            ),
+        )
+
+        index_chunks(
+            self.client,
+            collection_name="gate_v2",
+            chunks=self.original_chunks,
+            vectors=[
+                [1.0, 0.0, 0.0]
+                for _ in self.original_chunks
+            ],
+        )
+
+        markdown_path = (
+            Path(proof["processed_pages_dir"])
+            / (page_id(SOURCE_URL) + ".md")
+        )
+
+        real_client = self.client
+
+        class MutatingClient:
+            changed = False
+
+            def __getattr__(self, name):
+                return getattr(real_client, name)
+
+            def scroll(self, *, collection_name, **kwargs):
+                result = real_client.scroll(
+                    collection_name=collection_name,
+                    **kwargs,
+                )
+
+                # Simulate a concurrent file modification AFTER
+                # initial content verification, during Qdrant checks.
+                if (
+                    collection_name == "gate_v1"
+                    and kwargs.get("with_vectors") is True
+                    and not self.changed
+                ):
+                    markdown_path.write_text(
+                        markdown + "\nUnverified concurrent edit.\n",
+                        encoding="utf-8",
+                    )
+                    self.changed = True
+
+                return result
+
+        client = MutatingClient()
+
+        with self.assertRaises(ValueError):
+            activate_collection_snapshot(
+                client,
+                alias_name="gate_active",
+                expected_active_collection="gate_v1",
+                staged_collection="gate_v2",
+                expected_chunk_ids=[
+                    chunk["chunk_id"]
+                    for chunk in self.original_chunks
+                ],
+                **proof,
+            )
+
+        self.assertTrue(
+            client.changed,
+            "Test must exercise the simulated concurrent edit.",
+        )
+        self.assertEqual(
+            self.active_collection(),
+            "gate_v1",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
