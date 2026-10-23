@@ -236,6 +236,7 @@ class TestMandatoryActivationGate(unittest.TestCase):
             "manifest_path": manifest_path,
             "processed_pages_dir": pages,
             "report_path": report_path,
+            "lock_path": root / "refresh.lock",
         }
 
     def test_matching_verified_markdown_allows_refresh(self):
@@ -568,6 +569,102 @@ class TestMandatoryActivationGate(unittest.TestCase):
             self.active_collection(),
             "gate_v1",
         )
+
+
+    def test_refresh_rejects_busy_lock_before_embedding(self):
+        from unittest.mock import Mock
+        from app.ingestion.locking import refresh_lock
+
+        markdown = (
+            "# Test Course\n"
+            "## Curriculum\n"
+            "Learn Python fundamentals.\n"
+        )
+
+        proof = self.published_proof(markdown)
+        lock_path = (
+            proof["processed_pages_dir"].parent / "refresh.lock"
+        )
+
+        embedder = Mock(
+            return_value=[[0.0, 1.0, 0.0]]
+        )
+
+        with refresh_lock(lock_path):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "(?i)lock|refresh|busy",
+            ):
+                refresh_page_snapshot(
+                    self.client,
+                    source_collection="gate_v1",
+                    staged_collection="gate_v2",
+                    alias_name="gate_active",
+                    source_url=SOURCE_URL,
+                    fresh_chunks=chunk_markdown(
+                        markdown,
+                        source_url=SOURCE_URL,
+                    ),
+                    embed_texts=embedder,
+                    vector_size=3,
+                    **proof,
+                )
+
+        embedder.assert_not_called()
+        self.assertEqual(self.active_collection(), "gate_v1")
+        self.assertFalse(
+            self.client.collection_exists("gate_v2")
+        )
+
+    def test_direct_activation_rejects_busy_lock(self):
+        from app.ingestion.locking import refresh_lock
+
+        proof = self.published_proof(
+            "# Test Course\n"
+            "## Curriculum\n"
+            "Learn SQL fundamentals.\n"
+        )
+
+        lock_path = (
+            proof["processed_pages_dir"].parent / "refresh.lock"
+        )
+
+        self.client.create_collection(
+            collection_name="gate_v2",
+            vectors_config=models.VectorParams(
+                size=3,
+                distance=models.Distance.COSINE,
+            ),
+        )
+
+        index_chunks(
+            self.client,
+            collection_name="gate_v2",
+            chunks=self.original_chunks,
+            vectors=[
+                [1.0, 0.0, 0.0]
+                for _ in self.original_chunks
+            ],
+        )
+
+        with refresh_lock(lock_path):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "(?i)lock|refresh|busy",
+            ):
+                activate_collection_snapshot(
+                    self.client,
+                    alias_name="gate_active",
+                    expected_active_collection="gate_v1",
+                    staged_collection="gate_v2",
+                    expected_chunk_ids=[
+                        chunk["chunk_id"]
+                        for chunk in self.original_chunks
+                    ],
+                    **proof,
+                )
+
+        self.assertEqual(self.active_collection(), "gate_v1")
 
 
 if __name__ == "__main__":

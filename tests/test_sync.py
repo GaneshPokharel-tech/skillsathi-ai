@@ -472,6 +472,7 @@ def _make_published_proof(test_case, pages):
         "manifest_path": manifest_path,
         "processed_pages_dir": directory,
         "report_path": report_path,
+        "lock_path": root / "refresh.lock",
     }
 
 
@@ -1028,7 +1029,7 @@ class TestPageRefreshWorkflow(unittest.TestCase):
         from unittest.mock import patch
 
         with patch(
-            "app.ingestion.sync.activate_collection_snapshot",
+            "app.ingestion.sync._activate_collection_snapshot_locked",
             side_effect=RuntimeError("Activation unavailable"),
         ):
             with self.assertRaises(RuntimeError):

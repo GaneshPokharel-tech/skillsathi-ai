@@ -229,7 +229,7 @@ def stage_page_refresh(
 ACTIVE_COLLECTION_ALIAS = "skillshikshya_active"
 
 
-def activate_collection_snapshot(
+def _activate_collection_snapshot_locked(
     client,
     *,
     alias_name: str,
@@ -718,7 +718,7 @@ def build_staged_page_snapshot(
 
 
 
-def refresh_page_snapshot(
+def _refresh_page_snapshot_locked(
     client,
     *,
     source_collection: str,
@@ -801,7 +801,7 @@ def refresh_page_snapshot(
         plan=plan,
     )
 
-    activated = activate_collection_snapshot(
+    activated = _activate_collection_snapshot_locked(
         client,
         alias_name=alias_name,
         expected_active_collection=source_collection,
@@ -1409,3 +1409,119 @@ def _load_verified_page_chunks(
         raise ValueError("Verified page produced no indexable chunks.")
 
     return chunks
+
+
+
+def _require_refresh_lock_path(
+    *,
+    lock_path,
+    manifest_path,
+    processed_pages_dir,
+    report_path,
+):
+    """Require explicit proof paths and one absolute coordination path."""
+    from pathlib import Path
+
+    if any(value is None for value in (
+        manifest_path,
+        processed_pages_dir,
+        report_path,
+    )):
+        raise ValueError(
+            "Missing verified crawl proof for snapshot activation."
+        )
+
+    if lock_path is None:
+        raise ValueError(
+            "A shared refresh lock path is required."
+        )
+
+    try:
+        resolved = Path(lock_path)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid refresh lock path.") from exc
+
+    if not resolved.is_absolute():
+        raise ValueError(
+            "Refresh lock path must be absolute."
+        )
+
+    return resolved
+
+
+def activate_collection_snapshot(
+    client,
+    *,
+    alias_name: str,
+    expected_active_collection: str,
+    staged_collection: str,
+    expected_chunk_ids: list[str],
+    manifest_path=None,
+    processed_pages_dir=None,
+    report_path=None,
+    lock_path=None,
+) -> dict:
+    """Validate and activate under an exclusive inter-process lock."""
+    from app.ingestion.locking import refresh_lock
+
+    path = _require_refresh_lock_path(
+        lock_path=lock_path,
+        manifest_path=manifest_path,
+        processed_pages_dir=processed_pages_dir,
+        report_path=report_path,
+    )
+
+    with refresh_lock(path):
+        return _activate_collection_snapshot_locked(
+            client,
+            alias_name=alias_name,
+            expected_active_collection=expected_active_collection,
+            staged_collection=staged_collection,
+            expected_chunk_ids=expected_chunk_ids,
+            manifest_path=manifest_path,
+            processed_pages_dir=processed_pages_dir,
+            report_path=report_path,
+        )
+
+
+def refresh_page_snapshot(
+    client,
+    *,
+    source_collection: str,
+    staged_collection: str,
+    alias_name: str,
+    source_url: str,
+    fresh_chunks: list[dict],
+    embed_texts,
+    vector_size: int,
+    manifest_path=None,
+    processed_pages_dir=None,
+    report_path=None,
+    lock_path=None,
+) -> dict:
+    """Hold one lock across verification, embedding and activation."""
+    from app.ingestion.locking import refresh_lock
+
+    path = _require_refresh_lock_path(
+        lock_path=lock_path,
+        manifest_path=manifest_path,
+        processed_pages_dir=processed_pages_dir,
+        report_path=report_path,
+    )
+
+    with refresh_lock(path):
+        # The internal activation path runs under this same lock.
+        # Do not acquire a second non-reentrant file lock.
+        return _refresh_page_snapshot_locked(
+            client,
+            source_collection=source_collection,
+            staged_collection=staged_collection,
+            alias_name=alias_name,
+            source_url=source_url,
+            fresh_chunks=fresh_chunks,
+            embed_texts=embed_texts,
+            vector_size=vector_size,
+            manifest_path=manifest_path,
+            processed_pages_dir=processed_pages_dir,
+            report_path=report_path,
+        )
