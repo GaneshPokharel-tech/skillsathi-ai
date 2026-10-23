@@ -236,12 +236,21 @@ def activate_collection_snapshot(
     expected_active_collection: str,
     staged_collection: str,
     expected_chunk_ids: list[str],
+    manifest_path=None,
+    processed_pages_dir=None,
+    report_path=None,
 ) -> dict:
     """Validate a complete staged snapshot before switching its alias.
 
     The caller must establish that expected_chunk_ids represents an
     approved, complete snapshot. This function never deletes collections.
     """
+    verified = require_verified_crawl_run(
+        manifest_path=manifest_path,
+        processed_pages_dir=processed_pages_dir,
+        report_path=report_path,
+    )
+
     from qdrant_client import models
 
     names = (
@@ -302,7 +311,34 @@ def activate_collection_snapshot(
     ):
         raise ValueError("Incompatible snapshot vector configuration.")
 
+    verified_chunks = {}
+    verified_urls = set(verified["validated_urls"])
+
+    for source_url in sorted(verified_urls):
+        chunks = _load_verified_page_chunks(
+            verified=verified,
+            source_url=source_url,
+            processed_pages_dir=processed_pages_dir,
+            report_path=report_path,
+        )
+
+        for chunk in chunks:
+            identifier = chunk["chunk_id"]
+
+            if identifier in verified_chunks:
+                raise ValueError(
+                    "Duplicate chunk ID in verified crawl."
+                )
+
+            verified_chunks[identifier] = {
+                "source_url": chunk["source_url"],
+                "document_title": chunk["document_title"],
+                "section": chunk["section"],
+                "text": chunk["text"],
+            }
+
     actual_ids = set()
+    seen_verified_ids = set()
     offset = None
 
     while True:
@@ -310,14 +346,39 @@ def activate_collection_snapshot(
             collection_name=staged_collection,
             limit=256,
             offset=offset,
-            with_payload=False,
+            with_payload=True,
             with_vectors=False,
         )
 
-        actual_ids.update(str(record.id) for record in records)
+        for record in records:
+            identifier = str(record.id)
+            actual_ids.add(identifier)
+
+            payload = record.payload
+
+            if identifier in verified_chunks:
+                if payload != verified_chunks[identifier]:
+                    raise ValueError(
+                        "Staged payload does not match verified Markdown."
+                    )
+
+                seen_verified_ids.add(identifier)
+
+            elif (
+                isinstance(payload, dict)
+                and payload.get("source_url") in verified_urls
+            ):
+                raise ValueError(
+                    "Unexpected chunk for a verified crawl page."
+                )
 
         if offset is None:
             break
+
+    if seen_verified_ids != set(verified_chunks):
+        raise ValueError(
+            "Staged collection is missing verified crawl chunks."
+        )
 
     expected_ids = set(expected_chunk_ids)
 
@@ -582,6 +643,9 @@ def refresh_page_snapshot(
     fresh_chunks: list[dict],
     embed_texts,
     vector_size: int,
+    manifest_path=None,
+    processed_pages_dir=None,
+    report_path=None,
 ) -> dict:
     """Stage, verify and activate a single successfully crawled page.
 
@@ -589,6 +653,29 @@ def refresh_page_snapshot(
     content, and exclusive database-write coordination. Never deletes
     the previous active collection.
     """
+    verified = require_verified_crawl_run(
+        manifest_path=manifest_path,
+        processed_pages_dir=processed_pages_dir,
+        report_path=report_path,
+    )
+
+    if source_url not in verified["validated_urls"]:
+        raise ValueError(
+            "Refresh source URL is absent from verified crawl."
+        )
+
+    expected_chunks = _load_verified_page_chunks(
+        verified=verified,
+        source_url=source_url,
+        processed_pages_dir=processed_pages_dir,
+        report_path=report_path,
+    )
+
+    if fresh_chunks != expected_chunks:
+        raise ValueError(
+            "Refresh chunks do not match verified crawl content."
+        )
+
     if (
         not isinstance(alias_name, str)
         or not alias_name.strip()
@@ -635,6 +722,9 @@ def refresh_page_snapshot(
         expected_active_collection=source_collection,
         staged_collection=staged_collection,
         expected_chunk_ids=built["expected_chunk_ids"],
+        manifest_path=manifest_path,
+        processed_pages_dir=processed_pages_dir,
+        report_path=report_path,
     )
 
     return {
@@ -1120,3 +1210,117 @@ def verify_published_crawl_run(
             )
 
     return result
+
+
+
+def require_verified_crawl_run(
+    *,
+    manifest_path=None,
+    processed_pages_dir=None,
+    report_path=None,
+) -> dict:
+    """Fail closed unless an actual published crawl run verifies."""
+    if any(
+        value is None
+        for value in (
+            manifest_path,
+            processed_pages_dir,
+            report_path,
+        )
+    ):
+        raise ValueError(
+            "Missing verified crawl proof for snapshot activation."
+        )
+
+    return verify_published_crawl_run(
+        manifest_path=manifest_path,
+        processed_pages_dir=processed_pages_dir,
+        report_path=report_path,
+    )
+
+
+
+def _load_verified_page_chunks(
+    *,
+    verified: dict,
+    source_url: str,
+    processed_pages_dir,
+    report_path,
+) -> list[dict]:
+    """Recreate canonical chunks from a verified published page."""
+    import hashlib
+    import json
+    from pathlib import Path
+
+    from app.ingestion.crawler import page_id
+    from app.rag.engine import chunk_markdown
+
+    if source_url not in verified["validated_urls"]:
+        raise ValueError("Page is absent from verified crawl.")
+
+    identifier = page_id(source_url)
+    directory = Path(processed_pages_dir)
+
+    try:
+        report = json.loads(
+            Path(report_path).read_text(encoding="utf-8")
+        )
+        metadata = json.loads(
+            (directory / (identifier + ".json")).read_text(
+                encoding="utf-8"
+            )
+        )
+        content_bytes = (
+            directory / (identifier + ".md")
+        ).read_bytes()
+        markdown = content_bytes.decode("utf-8")
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            "Verified page files cannot be read."
+        ) from exc
+
+    if (
+        not isinstance(report, dict)
+        or not isinstance(metadata, dict)
+        or report.get("run_id") != verified["run_id"]
+        or not isinstance(report.get("pages"), list)
+    ):
+        raise ValueError("Verified run metadata changed.")
+
+    matching_records = [
+        record
+        for record in report["pages"]
+        if isinstance(record, dict)
+        and record.get("source_url") == source_url
+    ]
+
+    if len(matching_records) != 1:
+        raise ValueError("Verified page report is inconsistent.")
+
+    record = matching_records[0]
+    digest = hashlib.sha256(content_bytes).hexdigest()
+
+    if (
+        metadata.get("run_id") != verified["run_id"]
+        or metadata.get("source_url") != source_url
+        or metadata.get("content_hash") != digest
+        or record.get("run_id") != verified["run_id"]
+        or record.get("status") != "processed"
+        or record.get("content_hash") != digest
+        or record.get("cleaned_character_count") != len(markdown)
+        or metadata.get("cleaned_character_count") != len(markdown)
+        or not markdown.strip()
+    ):
+        raise ValueError(
+            "Published page no longer matches verified crawl."
+        )
+
+    chunks = chunk_markdown(
+        markdown,
+        source_url=source_url,
+    )
+
+    if not chunks:
+        raise ValueError("Verified page produced no indexable chunks.")
+
+    return chunks

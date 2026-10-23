@@ -383,6 +383,98 @@ class TestStagedPageRefresh(unittest.TestCase):
 
 
 
+
+
+def _make_published_proof(test_case, pages):
+    """Create real verified crawl files for snapshot integration tests."""
+    import hashlib
+    import json
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from app.ingestion.crawler import page_id
+
+    temporary = TemporaryDirectory()
+    test_case.addCleanup(temporary.cleanup)
+
+    root = Path(temporary.name)
+    directory = root / "processed"
+    directory.mkdir()
+
+    run_id = "snapshot-test-run"
+    urls = list(pages)
+    crawl_records = []
+    processed_records = []
+
+    for url, markdown in pages.items():
+        identifier = page_id(url)
+        filename = identifier + ".md"
+        digest = hashlib.sha256(
+            markdown.encode("utf-8")
+        ).hexdigest()
+
+        (directory / filename).write_text(
+            markdown, encoding="utf-8"
+        )
+        (directory / (identifier + ".json")).write_text(
+            json.dumps({
+                "run_id": run_id,
+                "source_url": url,
+                "content_hash": digest,
+                "cleaned_character_count": len(markdown),
+            }),
+            encoding="utf-8",
+        )
+
+        crawl_records.append({
+            "run_id": run_id,
+            "source_url": url,
+            "final_url": url,
+            "status": "success",
+        })
+
+        processed_records.append({
+            "run_id": run_id,
+            "source_url": url,
+            "status": "processed",
+            "file": filename,
+            "content_hash": digest,
+            "cleaned_character_count": len(markdown),
+        })
+
+    manifest_path = root / "crawl_manifest.json"
+    manifest_path.write_text(
+        json.dumps({
+            "run_id": run_id,
+            "status": "complete",
+            "expected_urls": urls,
+            "attempted": len(urls),
+            "successful": len(urls),
+            "failed": 0,
+            "pages": crawl_records,
+        }),
+        encoding="utf-8",
+    )
+
+    report_path = root / "cleaning_report.json"
+    report_path.write_text(
+        json.dumps({
+            "run_id": run_id,
+            "processed": len(urls),
+            "skipped": 0,
+            "failed": 0,
+            "pages": processed_records,
+        }),
+        encoding="utf-8",
+    )
+
+    return {
+        "manifest_path": manifest_path,
+        "processed_pages_dir": directory,
+        "report_path": report_path,
+    }
+
+
 class TestSnapshotActivation(unittest.TestCase):
 
     def setUp(self):
@@ -403,15 +495,44 @@ class TestSnapshotActivation(unittest.TestCase):
                 ),
             )
 
-            self.client.upsert(
-                collection_name=name,
-                points=[
+            if generation == "new":
+                self.new_markdown = (
+                    "# Snapshot Course\n"
+                    "## Curriculum\n"
+                    "Learn Python fundamentals.\n"
+                )
+                self.new_chunks = chunk_markdown(
+                    self.new_markdown,
+                    source_url=SOURCE,
+                )
+                points = [
+                    models.PointStruct(
+                        id=chunk["chunk_id"],
+                        vector=[1.0, 0.0, 0.0],
+                        payload={
+                            key: chunk[key]
+                            for key in (
+                                "source_url",
+                                "document_title",
+                                "section",
+                                "text",
+                            )
+                        },
+                    )
+                    for chunk in self.new_chunks
+                ]
+            else:
+                points = [
                     models.PointStruct(
                         id=identifier,
                         vector=[1.0, 0.0, 0.0],
                         payload={"generation": generation},
                     )
-                ],
+                ]
+
+            self.client.upsert(
+                collection_name=name,
+                points=points,
                 wait=True,
             )
 
@@ -435,7 +556,7 @@ class TestSnapshotActivation(unittest.TestCase):
             limit=10,
             with_payload=True,
         )[0]
-        return records[0].payload["generation"]
+        return records[0].payload.get("generation", "new")
 
     def activate(self, **overrides):
         from app.ingestion.sync import activate_collection_snapshot
@@ -444,7 +565,13 @@ class TestSnapshotActivation(unittest.TestCase):
             "alias_name": "active_test",
             "expected_active_collection": "snapshot_old",
             "staged_collection": "snapshot_new",
-            "expected_chunk_ids": ["202"],
+            "expected_chunk_ids": [
+                chunk["chunk_id"] for chunk in self.new_chunks
+            ],
+            **_make_published_proof(
+                self,
+                {SOURCE: self.new_markdown},
+            ),
         }
 
         arguments.update(overrides)
@@ -481,7 +608,10 @@ class TestSnapshotActivation(unittest.TestCase):
     def test_incomplete_snapshot_never_activates(self):
         with self.assertRaises(ValueError):
             self.activate(
-                expected_chunk_ids=["202", "999"],
+                expected_chunk_ids=[
+                    self.new_chunks[0]["chunk_id"],
+                    "999",
+                ],
             )
 
         self.assertEqual(self.active_generation(), "old")
@@ -513,7 +643,10 @@ class TestSnapshotActivation(unittest.TestCase):
     def test_duplicate_manifest_is_rejected(self):
         with self.assertRaises(ValueError):
             self.activate(
-                expected_chunk_ids=["202", "202"],
+                expected_chunk_ids=[
+                    self.new_chunks[0]["chunk_id"],
+                    self.new_chunks[0]["chunk_id"],
+                ],
             )
 
         self.assertEqual(self.active_generation(), "old")
@@ -750,13 +883,18 @@ class TestPageRefreshWorkflow(unittest.TestCase):
     def tearDown(self):
         self.client.close()
 
-    def fresh(self, curriculum="Python"):
-        return chunk_markdown(
+    def course_markdown(self, curriculum="Python"):
+        return (
             "# Example Course\n"
             "## Overview\n"
             "Learn Excel for reporting.\n"
             "## Curriculum\n"
-            f"Learn {curriculum} fundamentals.\n",
+            f"Learn {curriculum} fundamentals.\n"
+        )
+
+    def fresh(self, curriculum="Python"):
+        return chunk_markdown(
+            self.course_markdown(curriculum),
             source_url=SOURCE,
         )
 
@@ -766,7 +904,7 @@ class TestPageRefreshWorkflow(unittest.TestCase):
             for item in self.client.get_aliases().aliases
         }[self.alias]
 
-    def refresh(self, **overrides):
+    def refresh(self, *, curriculum="Python", **overrides):
         from app.ingestion.sync import refresh_page_snapshot
 
         arguments = {
@@ -774,11 +912,15 @@ class TestPageRefreshWorkflow(unittest.TestCase):
             "staged_collection": "workflow_v2",
             "alias_name": self.alias,
             "source_url": SOURCE,
-            "fresh_chunks": self.fresh(),
+            "fresh_chunks": self.fresh(curriculum),
             "embed_texts": lambda texts: [
                 [0.0, 1.0, 0.0] for _ in texts
             ],
             "vector_size": 3,
+            **_make_published_proof(
+                self,
+                {SOURCE: self.course_markdown(curriculum)},
+            ),
         }
 
         arguments.update(overrides)
@@ -819,7 +961,7 @@ class TestPageRefreshWorkflow(unittest.TestCase):
         embedder = Mock()
 
         result = self.refresh(
-            fresh_chunks=self.fresh("SQL"),
+            curriculum="SQL",
             embed_texts=embedder,
         )
 
