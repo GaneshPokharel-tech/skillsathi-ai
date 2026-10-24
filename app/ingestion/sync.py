@@ -961,6 +961,26 @@ def _process_crawl_run_locked(
     processed_pages_dir = Path(processed_pages_dir)
     report_path = Path(report_path)
 
+    # Legacy processing is initial-publication-only.
+    # Refuse existing content, including incomplete prior writes.
+    # Updates must use immutable generation publication instead.
+    if report_path.exists() or report_path.is_symlink():
+        raise ValueError(
+            "Legacy processing cannot overwrite published content. "
+            "Use generation-based publication."
+        )
+
+    if processed_pages_dir.exists() or processed_pages_dir.is_symlink():
+        if (
+            processed_pages_dir.is_symlink()
+            or not processed_pages_dir.is_dir()
+            or any(processed_pages_dir.iterdir())
+        ):
+            raise ValueError(
+                "Legacy processing cannot overwrite published content. "
+                "Use generation-based publication."
+            )
+
     manifest = json.loads(
         manifest_path.read_text(encoding="utf-8")
     )
