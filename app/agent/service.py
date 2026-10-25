@@ -45,6 +45,45 @@ def _selected_option(question: str) -> int | None:
 
 
 
+def _immediate_safety_reply(question: str, language: str):
+    """Prioritize immediate safety over course retrieval for crisis statements."""
+    import re
+
+    message = question.casefold()
+
+    patterns = (
+        r"\b(?:kill myself|end my life|want to die|about to die)\b",
+        r"\bmarna\s+(?:la+geko|lagya)\s+(?:chu|xu|chhu)\b",
+        r"\b(?:ma|mah)\s+marna\s+chahanchu\b",
+        r"म\s+मर्न\s+लागे",
+        r"म\s+मर्न\s+चाहन्छु",
+        r"आत्महत्या\s+गर्न\s+लागे",
+    )
+
+    if not any(re.search(pattern, message) for pattern in patterns):
+        return None
+
+    if language == "en":
+        return (
+            "Your immediate safety matters. If you are in danger "
+            "right now, call your local emergency service or go to "
+            "the nearest emergency department. Move away from "
+            "anything you could use to hurt yourself and contact "
+            "someone you trust who can stay with you. "
+            "Are you safe right now?"
+        )
+
+    return (
+        "तपाईंको सुरक्षा अहिले सबैभन्दा महत्त्वपूर्ण छ। "
+        "यदि अहिले खतरा छ भने तुरुन्त स्थानीय आपत्कालीन "
+        "सेवामा फोन गर्नुहोस् वा नजिकको अस्पतालको "
+        "आपत्कालीन कक्षमा जानुहोस्। आफूलाई चोट पुर्‍याउन "
+        "सक्ने वस्तुबाट टाढा रहनुहोस् र विश्वासिलो "
+        "व्यक्तिलाई आफूसँग बस्न बोलाउनुहोस्। "
+        "तपाईं अहिले सुरक्षित हुनुहुन्छ?"
+    )
+
+
 def ask_agent(
     question: str,
     *,
@@ -78,6 +117,14 @@ def ask_agent(
             or len(set(pending_course_urls)) != len(pending_course_urls)
         ):
             raise ValueError("Invalid pending course options.")
+
+    safety_reply = _immediate_safety_reply(question, language)
+    if safety_reply is not None:
+        return {
+            "answer": safety_reply,
+            "citations": [],
+            "retrieved_chunks": 0,
+        }
 
     selected = _selected_option(question)
     effective_question = question.strip()

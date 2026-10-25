@@ -114,3 +114,20 @@ def chat(request: ChatRequest) -> ChatResponse:
             status_code=503,
             detail="Chat service temporarily unavailable.",
         ) from None
+
+
+
+@app.get("/widget.js", include_in_schema=False)
+def chatbot_widget_script():
+    """Serve the embeddable chatbot launcher."""
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+
+    return FileResponse(
+        Path(__file__).with_name("widget.js"),
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

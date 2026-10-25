@@ -568,7 +568,23 @@
       letter-spacing: -.6px;
     }
 
-  </style>
+
+    /* Official SkillShikshya logo in chatbot header */
+    .header .mark {
+      background: #ffffff;
+      padding: 4px;
+      overflow: hidden;
+      box-sizing: border-box;
+    }
+
+    .header .mark img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+</style>
 </head>
 <body>
   <div class="app">
@@ -627,7 +643,14 @@
     </aside>
 
     <header class="header">
-      <div class="mark" aria-hidden="true">S</div>
+      <div class="mark" aria-hidden="true">
+        <img
+          src="/brand-icon"
+          alt=""
+          width="44"
+          height="44"
+        >
+      </div>
       <div class="identity">
         <h1>SkillSathi AI</h1>
         <p id="subtitle">Your SkillShikshya learning companion</p>
@@ -766,15 +789,74 @@
     }
 
     function addInline(parent, value) {
-      for (const token of value.split(/(\*\*[^*]+\*\*)/g)) {
+      // Render text safely. Never interpret chatbot output as HTML.
+      const parts = value.split(
+        /(\*\*[^*]+\*\*|\[[^\]\n]+\]\((?:https?:\/\/|mailto:)[^\s)]+\)|https?:\/\/[^\s<>\[\]()]+|[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/gi
+      );
+
+      function appendLink(label, href) {
+        try {
+          const url = new URL(href);
+
+          if (!["https:", "http:", "mailto:"].includes(url.protocol)) {
+            return false;
+          }
+
+          const anchor = document.createElement("a");
+          anchor.href = url.href;
+          anchor.textContent = label;
+
+          if (url.protocol !== "mailto:") {
+            anchor.target = "_blank";
+            anchor.rel = "noopener noreferrer";
+          }
+
+          parent.appendChild(anchor);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+
+      for (const token of parts) {
         if (!token) continue;
+
         if (token.startsWith("**") && token.endsWith("**")) {
           const strong = document.createElement("strong");
           strong.textContent = token.slice(2, -2);
           parent.appendChild(strong);
-        } else {
-          parent.appendChild(document.createTextNode(token));
+          continue;
         }
+
+        const markdownLink = token.match(
+          /^\[([^\]\n]+)\]\(((?:https?:\/\/|mailto:)[^\s)]+)\)$/
+        );
+
+        if (markdownLink) {
+          if (appendLink(markdownLink[1], markdownLink[2])) {
+            continue;
+          }
+        }
+
+        if (/^https?:\/\//i.test(token)) {
+          const cleaned = token.replace(/[.,;!?]+$/, "");
+          const punctuation = token.slice(cleaned.length);
+
+          if (appendLink(cleaned, cleaned)) {
+            if (punctuation) {
+              parent.appendChild(document.createTextNode(punctuation));
+            }
+            continue;
+          }
+        }
+
+        if (/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(token)) {
+          if (appendLink(token, "mailto:" + token)) {
+            continue;
+          }
+        }
+
+        parent.appendChild(document.createTextNode(token));
       }
     }
 
