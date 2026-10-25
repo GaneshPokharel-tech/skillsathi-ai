@@ -604,3 +604,66 @@ def _prepare_or_reuse_verified_generation(
 
     # A successful comparison does not mutate the old generation.
     return existing
+
+
+
+def activate_pinned_generation_snapshot(
+    client,
+    *,
+    active_pointer_path,
+    expected_run_id,
+    lock_path,
+    alias_name,
+    expected_active_collection,
+    staged_collection,
+    expected_chunk_ids,
+) -> dict:
+    """Activate Qdrant using only the pinned active crawl generation.
+
+    Hold the shared refresh lock across pointer resolution,
+    crawl verification, and Qdrant alias activation.
+    """
+    from app.ingestion import sync
+    from app.ingestion.locking import refresh_lock
+
+    pointer = Path(active_pointer_path)
+    lock = Path(lock_path)
+
+    if not pointer.is_absolute() or not lock.is_absolute():
+        raise ValueError(
+            "Active pointer and refresh lock must be absolute."
+        )
+
+    if lock != pointer.parent / "refresh.lock":
+        raise ValueError("Incorrect shared refresh lock path.")
+
+    if not isinstance(expected_run_id, str) or not expected_run_id.strip():
+        raise ValueError("Expected crawl run ID is required.")
+
+    with refresh_lock(lock):
+        # Resolve once and keep these immutable paths pinned.
+        generation = resolve_active_generation(
+            active_pointer_path=pointer,
+        )
+
+        verified = sync.verify_published_crawl_run(
+            **generation
+        )
+
+        if verified["run_id"] != expected_run_id:
+            raise ValueError(
+                "Active crawl generation run ID mismatch."
+            )
+
+        # Outer function already holds the lock.
+        # Internal activation performs Qdrant integrity checks.
+        return sync._activate_collection_snapshot_locked(
+            client,
+            alias_name=alias_name,
+            expected_active_collection=expected_active_collection,
+            staged_collection=staged_collection,
+            expected_chunk_ids=expected_chunk_ids,
+            manifest_path=generation["manifest_path"],
+            processed_pages_dir=generation["processed_pages_dir"],
+            report_path=generation["report_path"],
+        )

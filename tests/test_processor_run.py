@@ -1273,5 +1273,137 @@ raise RuntimeError("Expected crash point was not reached.")
         )
 
 
+
+    def test_pinned_activation_rejects_wrong_run_before_qdrant(self):
+        """A stale caller must not activate the wrong crawl run."""
+        from unittest.mock import patch
+
+        from app.ingestion import publication, sync
+
+        self.process()
+
+        root = self.manifest_path.parent
+        pointer = root / "active-generation.json"
+        lock_path = root / "refresh.lock"
+
+        generation = publication.prepare_verified_generation(
+            manifest_path=self.manifest_path,
+            processed_pages_dir=self.processed_dir,
+            report_path=self.report_path,
+            generations_dir=root / "generations",
+        )
+
+        publication.publish_active_generation(
+            generation_proof=generation,
+            active_pointer_path=pointer,
+            lock_path=lock_path,
+        )
+
+        pointer_before = pointer.read_bytes()
+
+        with patch.object(
+            sync,
+            "_activate_collection_snapshot_locked",
+        ) as activate:
+            with self.assertRaisesRegex(
+                ValueError,
+                "(?i)run|generation|mismatch",
+            ):
+                publication.activate_pinned_generation_snapshot(
+                    object(),
+                    active_pointer_path=pointer,
+                    expected_run_id="different-crawl-run",
+                    lock_path=lock_path,
+                    alias_name="test-active",
+                    expected_active_collection="test-v1",
+                    staged_collection="test-v2",
+                    expected_chunk_ids=[],
+                )
+
+            activate.assert_not_called()
+
+        self.assertEqual(
+            pointer.read_bytes(),
+            pointer_before,
+        )
+
+    def test_pinned_activation_uses_immutable_generation_paths(self):
+        """Qdrant must receive paths pinned by the active pointer."""
+        from unittest.mock import patch
+
+        from app.ingestion import publication, sync
+
+        self.process()
+
+        root = self.manifest_path.parent
+        pointer = root / "active-generation.json"
+        lock_path = root / "refresh.lock"
+
+        generation = publication.prepare_verified_generation(
+            manifest_path=self.manifest_path,
+            processed_pages_dir=self.processed_dir,
+            report_path=self.report_path,
+            generations_dir=root / "generations",
+        )
+
+        publication.publish_active_generation(
+            generation_proof=generation,
+            active_pointer_path=pointer,
+            lock_path=lock_path,
+        )
+
+        expected_result = {"activated": True}
+        client = object()
+
+        with patch.object(
+            sync,
+            "_activate_collection_snapshot_locked",
+            return_value=expected_result,
+        ) as activate:
+            result = publication.activate_pinned_generation_snapshot(
+                client,
+                active_pointer_path=pointer,
+                expected_run_id=self.run_id,
+                lock_path=lock_path,
+                alias_name="test-active",
+                expected_active_collection="test-v1",
+                staged_collection="test-v2",
+                expected_chunk_ids=["expected-point"],
+            )
+
+            self.assertEqual(result, expected_result)
+            activate.assert_called_once()
+
+            args, kwargs = activate.call_args
+
+            self.assertIs(args[0], client)
+            self.assertEqual(kwargs["alias_name"], "test-active")
+            self.assertEqual(
+                kwargs["expected_active_collection"],
+                "test-v1",
+            )
+            self.assertEqual(kwargs["staged_collection"], "test-v2")
+            self.assertEqual(
+                kwargs["expected_chunk_ids"],
+                ["expected-point"],
+            )
+
+            for key in (
+                "manifest_path",
+                "processed_pages_dir",
+                "report_path",
+            ):
+                self.assertEqual(
+                    Path(kwargs[key]),
+                    Path(generation[key]),
+                )
+
+        # No legacy mutable paths may be passed to Qdrant.
+        self.assertNotEqual(
+            Path(generation["processed_pages_dir"]),
+            self.processed_dir,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
