@@ -584,6 +584,96 @@
       object-fit: contain;
     }
 
+
+    /* Mobile chat controls: prevent horizontal clipping in iframe */
+    @media (max-width: 650px) {
+      .app,
+      .header,
+      .chat-view,
+      .messages,
+      .composer {
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+      }
+
+      .header {
+        gap: 8px;
+        padding: 12px;
+      }
+
+      .header .mark {
+        width: 40px;
+        height: 40px;
+        flex: 0 0 40px;
+      }
+
+      .header .identity {
+        flex: 1 1 0;
+        min-width: 0;
+      }
+
+      .header .identity h1 {
+        font-size: 16px;
+      }
+
+      .header .identity p {
+        font-size: 10px;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
+      }
+
+      .language-switch {
+        flex: 0 0 auto;
+        max-width: 36%;
+        padding: 8px;
+        font-size: 11px;
+        line-height: 1.3;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+
+      .messages {
+        overflow-x: hidden;
+      }
+
+      .message,
+      .bubble,
+      .answer,
+      .message-text,
+      .sources {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .composer {
+        width: 100%;
+        padding: 12px;
+      }
+
+      .composer form {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        width: 100%;
+        min-width: 0;
+        gap: 8px;
+        align-items: end;
+      }
+
+      .composer textarea {
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+      }
+
+      .composer .send {
+        min-width: 0;
+        padding: 11px 12px;
+        font-size: 12px;
+        white-space: nowrap;
+      }
+    }
+
 </style>
 </head>
 <body>

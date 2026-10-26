@@ -132,9 +132,13 @@
         }
 
         .panel {
+          position: absolute;
           inset: 0;
-          width: 100vw;
-          height: 100dvh;
+          width: 100%;
+          height: 100%;
+          max-width: 100%;
+          max-height: 100%;
+          box-sizing: border-box;
           border: 0;
           border-radius: 0;
         }
