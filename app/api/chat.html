@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#1da077">
-  <title>SkillSathi AI | SkillShikshya</title>
+  <title>SkillShikshya Guide | SkillShikshya</title>
   <style>
     :root {
       font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -674,6 +674,17 @@
       }
     }
 
+
+    /* Official SkillShikshya logo in assistant messages */
+    .assistant-avatar-logo {
+      display: block;
+      width: 34px;
+      height: 34px;
+      object-fit: contain;
+      border-radius: 10px;
+      background: #fff;
+    }
+
 </style>
 </head>
 <body>
@@ -742,7 +753,7 @@
         >
       </div>
       <div class="identity">
-        <h1>SkillSathi AI</h1>
+        <h1>SkillShikshya Guide</h1>
         <p id="subtitle">Your SkillShikshya learning companion</p>
       </div>
       <button id="change-language" class="language-switch" type="button" hidden>Change language</button>
@@ -751,9 +762,9 @@
     <section class="gate" id="language-gate" aria-labelledby="language-title">
       <div class="gate-content">
         <div class="gate-icon" aria-hidden="true">अ / A</div>
-        <p class="eyebrow">Welcome to SkillSathi AI</p>
+        <p class="eyebrow">Welcome to SkillShikshya Guide</p>
         <h2 id="language-title">Choose your language</h2>
-        <p class="gate-description">तपाईं कुन भाषामा कुरा गर्न चाहनुहुन्छ?<br>How would you like SkillSathi AI to respond?</p>
+        <p class="gate-description">तपाईं कुन भाषामा कुरा गर्न चाहनुहुन्छ?<br>How would you like SkillShikshya Guide to respond?</p>
         <div class="choices">
           <button type="button" class="choice" data-language="ne">
             <span class="choice-icon" aria-hidden="true">ने</span>
@@ -770,11 +781,11 @@
       </div>
     </section>
 
-    <section class="chat-view" id="chat-view" hidden aria-label="SkillSathi chat">
+    <section class="chat-view" id="chat-view" hidden aria-label="SkillShikshya Guide chat">
       <main id="conversation" class="messages" role="log" aria-live="polite" aria-relevant="additions">
         <div class="intro" id="intro">
           <div class="intro-icon" aria-hidden="true">✦</div>
-          <p class="eyebrow">SKILLSATHI AI</p>
+          <p class="eyebrow">SKILLSHIKSHYA GUIDE</p>
           <h2 id="intro-title"></h2>
           <p id="intro-description"></p>
         </div>
@@ -814,7 +825,7 @@
       ne: {
         subtitle: "SkillShikshya को सिकाइ साथी",
         change: "भाषा बदल्नुहोस्",
-        title: "नमस्ते! म SkillSathi AI हुँ।",
+        title: "नमस्ते! म SkillShikshya Guide हुँ।",
         description: "SkillShikshya का कोर्स, सीप र पाठ्यक्रमबारे सोध्नुहोस्। वेबसाइटमा उपलब्ध जानकारीका आधारमा स्रोतसहित जवाफ दिनेछु।",
         placeholder: "कोर्स वा सीपबारे प्रश्न लेख्नुहोस्...",
         send: "पठाउनुहोस्",
@@ -828,7 +839,7 @@
       en: {
         subtitle: "Your SkillShikshya learning companion",
         change: "Change language",
-        title: "Hi! I'm SkillSathi AI.",
+        title: "Hi! I'm SkillShikshya Guide.",
         description: "Ask about SkillShikshya courses, skills, and curricula. I'll answer using available website information and show the sources.",
         placeholder: "Ask about courses, skills, or curricula...",
         send: "Send",
@@ -1016,7 +1027,17 @@
       const avatar = document.createElement("div");
       avatar.className = "avatar";
       avatar.setAttribute("aria-hidden", "true");
-      avatar.textContent = role === "user" ? "You" : "S";
+      if (role === "user") {
+        avatar.textContent = "You";
+      } else {
+        const logo = document.createElement("img");
+        logo.src = "/brand-icon";
+        logo.alt = "";
+        logo.width = 34;
+        logo.height = 34;
+        logo.className = "assistant-avatar-logo";
+        avatar.appendChild(logo);
+      }
       const bubble = document.createElement("div");
       bubble.className = "bubble";
       const body = document.createElement("div");

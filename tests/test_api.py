@@ -138,7 +138,7 @@ class TestChatPage(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("text/html", response.headers["content-type"])
-        self.assertIn("SkillSathi AI", response.text)
+        self.assertIn("SkillShikshya Guide", response.text)
         self.assertIn('fetch("/chat"', response.text)
 
     def test_swagger_docs_remain_available(self):
