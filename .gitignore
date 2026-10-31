@@ -43,3 +43,6 @@ htmlcov/
 
 # IDE
 .idea/
+
+# All generated runtime knowledge and crawl snapshots
+data/

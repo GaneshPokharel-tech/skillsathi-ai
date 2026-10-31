@@ -30,7 +30,27 @@ from crawl4ai import AsyncWebCrawler, BrowserConfig, CacheMode, CrawlerRunConfig
 # Configurable-domain ingestion will be implemented in a separate step.
 BASE_URL = "https://skillshikshya.com/"
 ALLOWED_HOSTS = {"skillshikshya.com", "www.skillshikshya.com"}
-CONTENT_PATHS = ("/courses", "/faq", "/about", "/blogs", "/contact-us")
+CONTENT_PATHS = (
+    '/courses',
+    '/faq',
+    '/about',
+    '/blogs',
+    '/contact-us',
+    '/announcements',
+    '/career',
+    '/corporate-training',
+    '/it-training-for-plus-2-completed-students',
+    '/it-training-for-see-appeared-students',
+    '/master-class',
+    '/news-media-coverage',
+    '/online-counselling',
+    '/partners',
+    '/privacy-policy',
+    '/success-stories',
+    '/terms-of-service',
+    '/testimonials',
+    '/workshop',
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = PROJECT_ROOT / "data" / "raw"

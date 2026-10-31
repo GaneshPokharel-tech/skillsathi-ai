@@ -10,12 +10,27 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.agent.service import ask_agent
+from contextlib import asynccontextmanager
+import asyncio
+from app.ingestion.auto_sync_scheduler import AutoSyncScheduler
 
 logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    scheduler = AutoSyncScheduler(chat_lock=_chat_lock)
+    scheduler.start()
+
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(scheduler.stop)
+
 
 app = FastAPI(
     title="SkillSathi AI API",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Local Qdrant uses filesystem storage. Serialize requests within

@@ -66,10 +66,32 @@ def execute_question(
         )
 
     elif tool == "knowledge_search":
-        evidence = retrieve_evidence(
-            question,
-            limit=top_k,
-        )
+        from app.agent.router import split_user_questions
+
+        parts = split_user_questions(question)
+
+        if len(parts) == 1:
+            evidence = retrieve_evidence(question, limit=top_k)
+        else:
+            evidence = []
+            seen = set()
+
+            for part in parts:
+                results = retrieve_evidence(
+                    part,
+                    limit=min(top_k, 3),
+                )
+
+                for item in results:
+                    key = (
+                        item.get("source_url"),
+                        item.get("section"),
+                        item.get("text"),
+                    )
+
+                    if key not in seen:
+                        seen.add(key)
+                        evidence.append(item)
 
         data = {
             "evidence": evidence,

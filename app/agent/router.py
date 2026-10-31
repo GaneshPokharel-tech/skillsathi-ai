@@ -15,6 +15,87 @@ def _tokens(value: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", value.casefold())) - GENERIC
 
 
+
+def split_user_questions(question: str) -> list[str]:
+    """Separate explicit multi-question messages without splitting courses."""
+    raw = question.strip()
+    if not raw:
+        return []
+
+    numbered = [
+        part.strip()
+        for part in re.split(
+            r"(?:^|\s)\d{1,2}[.)]\s+(?=\S)",
+            raw,
+        )
+        if part.strip()
+    ]
+
+    if (
+        2 <= len(numbered) <= 6
+        and re.search(r"(?:^|\s)\d{1,2}[.)]\s+", raw)
+    ):
+        return numbered
+
+    lines = [
+        re.sub(r"^[-•]\s*", "", line.strip())
+        for line in raw.splitlines()
+        if line.strip()
+    ]
+
+    if (
+        2 <= len(lines) <= 6
+        and all(len(part) >= 8 for part in lines)
+    ):
+        return lines
+
+
+    # Separate question marks even when the next question has
+    # no leading whitespace. Preserve URL query parameters.
+    url_spans = [
+        (match.start(), match.end())
+        for match in re.finditer(r"https?://\S+", raw)
+    ]
+
+    boundaries = [
+        match
+        for match in re.finditer(
+            r"(?<=[.!])\s+(?=[A-Z])|(?<=\?)\s*(?=[^\W\d_])",
+            raw,
+        )
+        if not any(
+            start <= match.start() < end
+            for start, end in url_spans
+        )
+    ]
+
+    sentence_parts = []
+    start = 0
+
+    for boundary in boundaries:
+        part = raw[start:boundary.start()].strip()
+        if part:
+            sentence_parts.append(part)
+        start = boundary.end()
+
+    if raw[start:].strip():
+        sentence_parts.append(raw[start:].strip())
+
+    if 2 <= len(sentence_parts) <= 6 and "?" in raw:
+        return sentence_parts
+
+    if raw.count("?") >= 2 and not url_spans:
+        parts = [
+            part.strip()
+            for part in re.findall(r"[^?]+\??", raw)
+            if part.strip()
+        ]
+        if 2 <= len(parts) <= 6:
+            return parts
+
+    return [raw]
+
+
 def decide_route(question: str, catalog: list[dict]) -> dict:
     """Plan one tool call without executing it or inventing courses."""
     if not isinstance(question, str) or not question.strip():
@@ -52,6 +133,24 @@ def decide_route(question: str, catalog: list[dict]) -> dict:
             )
         )
     )
+
+    informational_terms = (
+        "career path", "career options", "mission",
+        "counselling", "counseling", "blog", "article",
+        "contact", "address", "phone number",
+        "privacy policy", "terms of service",
+        "testimonials", "announcements",
+    )
+
+    if len(split_user_questions(question)) > 1 or (
+        not comparison
+        and not discovery
+        and any(term in text for term in informational_terms)
+    ):
+        return {
+            "tool": "knowledge_search",
+            "arguments": {"question": question.strip()},
+        }
 
     matches = []
 

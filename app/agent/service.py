@@ -300,6 +300,22 @@ def ask_agent(
             "retrieved_chunks": 0,
         }
 
+    if tool == "knowledge_search":
+        from app.agent.router import split_user_questions
+
+        parts = split_user_questions(question)
+
+        if len(parts) > 1:
+            effective_question = (
+                "Answer every question separately and in order, "
+                "using only the supplied SkillShikshya website evidence. "
+                "If evidence for a question is missing, say so.\n"
+                + "\n".join(
+                    f"{number}. {part}"
+                    for number, part in enumerate(parts, 1)
+                )
+            )
+
     from dotenv import load_dotenv
     from google import genai
     from google.genai import types

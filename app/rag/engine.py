@@ -259,12 +259,92 @@ def index_chunks(
     return len(points)
 
 
+
+def _preferred_source_url(question: str) -> str | None:
+    """Prioritize authoritative pages for explicit questions."""
+    import re
+
+    text = " ".join(question.casefold().split())
+    words = set(re.findall("[a-z]+", text))
+    base = "https://skillshikshya.com"
+
+    if "accounting career path" in text:
+        return base + "/blogs/accounting-career-path"
+
+    brand_mentioned = (
+        "skillshikshya" in text
+        or "skill shikshya" in text
+    )
+
+    institute_mentioned = bool(
+        {"institute", "institution"} & words
+    )
+
+    ranking_mentioned = bool(
+        {"prime", "best", "top", "number", "leading"} & words
+    )
+
+    if (
+        brand_mentioned
+        and institute_mentioned
+        and ranking_mentioned
+    ):
+        return base + "/about"
+
+    if (
+        "mission" in words
+        or "vision" in words
+        or "मिशन" in text
+        or "भिजन" in text
+    ):
+        return base + "/about"
+
+    if (
+        "counselling" in words
+        or "counseling" in words
+        or "काउन्सेलिङ" in text
+        or "करियर परामर्श" in text
+    ):
+        return base + "/online-counselling"
+
+    return None
+
+
+def _group_evidence_by_source(evidence: list[dict]) -> list[dict]:
+    """Use one citation marker for each distinct source URL."""
+    sources = []
+    positions = {}
+
+    for item in evidence:
+        url = item["source_url"]
+        excerpt = item["text"]
+
+        if url not in positions:
+            positions[url] = len(sources)
+
+            sources.append({
+                "marker": f"[{len(sources) + 1}]",
+                "source_url": url,
+                "section": item.get("section", ""),
+                "text": excerpt,
+            })
+
+        else:
+            existing = sources[positions[url]]
+
+            if excerpt not in existing["text"]:
+                existing["text"] += chr(10) * 2 + excerpt
+
+    return sources
+
+
 def search_chunks(
     client,
     *,
     collection_name: str,
     query_vector: list[float],
     limit: int = 5,
+    source_url: str | None = None,
 ) -> list[dict]:
     """Retrieve similar chunks with their source metadata."""
     import math
@@ -278,12 +358,30 @@ def search_chunks(
     ):
         raise ValueError("Invalid query embedding.")
 
-    response = client.query_points(
-        collection_name=collection_name,
-        query=[float(value) for value in query_vector],
-        limit=limit,
-        with_payload=True,
-    )
+    options = {
+        "collection_name": collection_name,
+        "query": [float(value) for value in query_vector],
+        "limit": limit,
+        "with_payload": True,
+    }
+
+    if source_url is not None:
+        from qdrant_client import models
+        from app.ingestion.crawler import normalize_content_url
+
+        if normalize_content_url(source_url) != source_url:
+            raise ValueError("Invalid authoritative source URL.")
+
+        options["query_filter"] = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="source_url",
+                    match=models.MatchValue(value=source_url),
+                )
+            ]
+        )
+
+    response = client.query_points(**options)
 
     results = []
 
@@ -362,6 +460,19 @@ def retrieve_evidence(
         model = TextEmbedding(model_name=MODEL_NAME)
         vector = next(model.embed([question])).tolist()
 
+        preferred = _preferred_source_url(question)
+
+        if preferred is not None:
+            matched = search_chunks(
+                client,
+                collection_name=collection_name,
+                query_vector=vector,
+                limit=limit,
+                source_url=preferred,
+            )
+            if matched:
+                return matched
+
         return search_chunks(
             client,
             collection_name=collection_name,
@@ -402,15 +513,7 @@ def answer_with_evidence(
             "citations": [],
         }
 
-    sources = [
-        {
-            "marker": f"[{index}]",
-            "source_url": item["source_url"],
-            "section": item.get("section", ""),
-            "text": item["text"],
-        }
-        for index, item in enumerate(evidence, start=1)
-    ]
+    sources = _group_evidence_by_source(evidence)
 
     response_language = (
         "English" if language == "en"
@@ -472,8 +575,8 @@ def answer_with_evidence(
     citations = [
         {
             "marker": f"[{index}]",
-            "source_url": evidence[index - 1]["source_url"],
-            "section": evidence[index - 1].get("section", ""),
+            "source_url": sources[index - 1]["source_url"],
+            "section": sources[index - 1].get("section", ""),
         }
         for index in cited_indices
     ]
