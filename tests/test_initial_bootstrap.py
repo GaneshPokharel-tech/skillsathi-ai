@@ -134,5 +134,52 @@ class BootstrapTests(unittest.TestCase):
         )
 
 
+
+class BootstrapScopeRegressionTests(unittest.TestCase):
+    def test_bootstrap_rejects_enrollment_form(self):
+        from contextlib import nullcontext
+        from tempfile import TemporaryDirectory
+        from unittest.mock import patch
+        from app.ingestion import bootstrap, crawler
+
+        class ScopeChecked(Exception):
+            pass
+
+        async def inspect_scope(*, scope, lock_path):
+            self.assertIsNone(
+                crawler.normalize_content_url(
+                    "https://skillshikshya.com/enroll-form",
+                    scope=scope,
+                )
+            )
+            self.assertEqual(
+                "https://skillshikshya.com/courses/example",
+                crawler.normalize_content_url(
+                    "https://skillshikshya.com/courses/example",
+                    scope=scope,
+                ),
+            )
+            raise ScopeChecked()
+
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            with (
+                patch(
+                    "app.ingestion.locking.refresh_lock",
+                    return_value=nullcontext(),
+                ),
+                patch.object(
+                    bootstrap.crawler,
+                    "crawl_homepage",
+                    new=inspect_scope,
+                ),
+            ):
+                with self.assertRaises(ScopeChecked):
+                    bootstrap.run_initial_bootstrap(
+                        receipt_path=root / "receipt.json",
+                        db_path=root / "qdrant",
+                        runs_root=root / "runs",
+                    )
+
 if __name__ == "__main__":
     unittest.main()

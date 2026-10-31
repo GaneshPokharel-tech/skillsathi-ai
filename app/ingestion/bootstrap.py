@@ -286,7 +286,11 @@ def run_initial_bootstrap(
     with refresh_lock(Path("data/auto-sync-run.lock")):
         _preflight(receipt_path, db_path)
 
-        scope = crawler.build_crawl_scope(crawler.BASE_URL)
+        scope = crawler.CrawlScope(
+            base_url=crawler.BASE_URL,
+            allowed_hosts=frozenset(crawler.ALLOWED_HOSTS),
+            content_paths=crawler.CONTENT_PATHS,
+        )
         run_root = (
             runs_root / ("initial-" + uuid4().hex[:12])
         ).resolve()
