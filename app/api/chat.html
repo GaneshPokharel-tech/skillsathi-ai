@@ -1083,6 +1083,172 @@
       send.textContent = value ? "…" : strings[selectedLanguage].send;
     }
 
+
+    // Keep one WebSocket open across successive chat questions.
+    // Fall back to HTTP only if the connection cannot be established.
+    let chatSocket = null;
+    let chatSocketOpening = null;
+    let websocketUnavailable = false;
+
+    function connectChatSocket() {
+      if (websocketUnavailable || typeof WebSocket === "undefined") {
+        return Promise.reject(new Error("WebSocket unavailable"));
+      }
+
+      if (chatSocket && chatSocket.readyState === WebSocket.OPEN) {
+        return Promise.resolve(chatSocket);
+      }
+
+      if (chatSocketOpening) return chatSocketOpening;
+
+      chatSocketOpening = new Promise((resolve, reject) => {
+        const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+        const socket = new WebSocket(
+          scheme + "//" + location.host + "/ws/chat"
+        );
+
+        let finished = false;
+
+        const timer = setTimeout(() => {
+          fail("WebSocket connection timeout");
+        }, 2500);
+
+        function fail(message) {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          socket.close();
+          reject(new Error(message));
+        }
+
+        socket.addEventListener("open", () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          chatSocket = socket;
+
+          socket.addEventListener("close", () => {
+            if (chatSocket === socket) chatSocket = null;
+          });
+
+          resolve(socket);
+        }, { once: true });
+
+        socket.addEventListener("error", () => {
+          fail("WebSocket connection failed");
+        }, { once: true });
+
+        socket.addEventListener("close", () => {
+          fail("WebSocket closed before opening");
+        }, { once: true });
+
+      }).finally(() => {
+        chatSocketOpening = null;
+      });
+
+      return chatSocketOpening;
+    }
+
+    async function postChatHttp(payload, signal) {
+      const response = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal
+      });
+
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status);
+      }
+
+      return response.json();
+    }
+
+    async function requestChat(payload, signal) {
+      let socket;
+
+      try {
+        socket = await connectChatSocket();
+      } catch {
+        // No question was sent, so HTTP fallback is safe.
+        websocketUnavailable = true;
+        return postChatHttp(payload, signal);
+      }
+
+      if (socket.readyState !== WebSocket.OPEN) {
+        return postChatHttp(payload, signal);
+      }
+
+      return new Promise((resolve, reject) => {
+        function cleanup() {
+          socket.removeEventListener("message", onMessage);
+          socket.removeEventListener("close", onClose);
+          socket.removeEventListener("error", onError);
+          signal.removeEventListener("abort", onAbort);
+        }
+
+        function finish(error, data) {
+          cleanup();
+
+          if (error) reject(error);
+          else resolve(data);
+        }
+
+        function onMessage(event) {
+          try {
+            const packet = JSON.parse(event.data);
+
+            if (
+              packet.type === "answer" &&
+              packet.data &&
+              typeof packet.data.answer === "string"
+            ) {
+              finish(null, packet.data);
+            } else {
+              finish(new Error("WebSocket service error"));
+            }
+          } catch {
+            socket.close();
+            finish(new Error("Invalid WebSocket response"));
+          }
+        }
+
+        function onClose() {
+          finish(new Error("WebSocket disconnected"));
+        }
+
+        function onError() {
+          finish(new Error("WebSocket connection error"));
+        }
+
+        function onAbort() {
+          // A timed-out request must not leave a late response
+          // on a socket that may be reused by another question.
+          socket.close();
+
+          const error = new Error("Chat request timed out");
+          error.name = "AbortError";
+          finish(error);
+        }
+
+        socket.addEventListener("message", onMessage);
+        socket.addEventListener("close", onClose);
+        socket.addEventListener("error", onError);
+        signal.addEventListener("abort", onAbort, { once: true });
+
+        if (signal.aborted) {
+          onAbort();
+          return;
+        }
+
+        try {
+          socket.send(JSON.stringify(payload));
+        } catch (error) {
+          finish(error);
+        }
+      });
+    }
+
     async function askQuestion(question) {
       if (busy || !selectedLanguage || !question || question.length > 2000) return;
       appendMessage("user", question);
@@ -1094,21 +1260,14 @@
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 120000);
       try {
-        const response = await fetch("/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            question,
-            top_k: 4,
-            language: languageForRequest,
-            ...(pendingCourseUrls
-              ? { pending_course_urls: pendingCourseUrls }
-              : {})
-          }),
-          signal: controller.signal
-        });
-        if (!response.ok) throw new Error("HTTP " + response.status);
-        const data = await response.json();
+        const data = await requestChat({
+          question,
+          top_k: 4,
+          language: languageForRequest,
+          ...(pendingCourseUrls
+            ? { pending_course_urls: pendingCourseUrls }
+            : {})
+        }, controller.signal);
         if (typeof data.answer !== "string" || !data.answer.trim()) throw new Error("Empty answer");
         const options = data.pending_course_urls;
 

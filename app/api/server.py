@@ -4,10 +4,10 @@ import logging
 from threading import Lock
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pathlib import Path
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.agent.service import ask_agent
 from contextlib import asynccontextmanager
@@ -130,6 +130,84 @@ def chat(request: ChatRequest) -> ChatResponse:
             detail="Chat service temporarily unavailable.",
         ) from None
 
+
+
+
+@app.websocket("/ws/chat")
+async def websocket_chat(websocket: WebSocket) -> None:
+    """Handle validated chat messages over one persistent connection."""
+    from urllib.parse import urlsplit
+
+    origin = websocket.headers.get("origin")
+
+    if origin is not None:
+        try:
+            parsed = urlsplit(origin)
+            allowed = (
+                parsed.scheme in {"http", "https"}
+                and parsed.netloc.lower()
+                == websocket.headers.get("host", "").lower()
+            )
+        except ValueError:
+            allowed = False
+
+        if not allowed:
+            await websocket.close(code=1008)
+            return
+
+    await websocket.accept()
+
+    invalid_request = {
+        "type": "error",
+        "code": "invalid_request",
+        "message": "Invalid chat request.",
+    }
+
+    service_unavailable = {
+        "type": "error",
+        "code": "service_unavailable",
+        "message": "Chat service temporarily unavailable.",
+    }
+
+    while True:
+        try:
+            payload = await websocket.receive_json()
+
+        except WebSocketDisconnect:
+            return
+
+        except (ValueError, UnicodeError):
+            await websocket.send_json(invalid_request)
+            continue
+
+        try:
+            request = ChatRequest.model_validate(payload)
+
+        except ValidationError:
+            await websocket.send_json(invalid_request)
+            continue
+
+        try:
+            # Reuse the HTTP handler, including its Qdrant lock,
+            # validation contract, and sanitized error handling.
+            response = await asyncio.to_thread(chat, request)
+
+        except HTTPException:
+            await websocket.send_json(service_unavailable)
+            continue
+
+        except Exception as exc:
+            logger.error(
+                "WebSocket chat failed: %s",
+                type(exc).__name__,
+            )
+            await websocket.send_json(service_unavailable)
+            continue
+
+        await websocket.send_json({
+            "type": "answer",
+            "data": response.model_dump(exclude_none=True),
+        })
 
 
 @app.get("/widget.js", include_in_schema=False)
