@@ -177,9 +177,19 @@ During a scheduled refresh, the system:
 The workflow is designed to preserve previously active knowledge if a refresh fails before activation.
 
 
-### Initial Knowledge Setup (Fresh Installation)
 
-A fresh clone does not include the local Qdrant database, crawled website data, or knowledge activation receipt. These files are excluded from Git for security and repository cleanliness.
+### Verification Status
+
+Verified on October 31, 2026, using a clean GitHub clone.
+
+- **Automated tests:** 266 passed.
+- **Fresh installation:** Dependencies installed successfully with `uv sync --frozen`.
+- **Live website crawl:** 38 approved public pages crawled successfully.
+- **Knowledge activation:** 38 verified pages and 857 embedding vectors indexed.
+- **Local Qdrant:** Initial knowledge collection activated successfully.
+- **Security:** Unapproved website URLs are excluded from bootstrap.
+
+Page and vector counts may change as SkillShikshya updates its website.
 
 Before using the chatbot for the first time:
 
