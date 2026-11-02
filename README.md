@@ -226,7 +226,7 @@ Responses contain an answer and citation data when available. A model-generated 
 
 The browser chat includes **“WhatsApp मा सम्पर्क गर्नुहोस्”**.
 
-- Destination: **+977 9868730959**.
+- Destination: **+977 98*****959**.
 - A click opens `wa.me` with a generic prefilled course/admission inquiry.
 - The student reviews or edits the message and presses **Send** in WhatsApp.
 - The app does **not** automatically send messages, collect a lead form or email student details.
@@ -330,9 +330,6 @@ A **public GitHub repository is not the same as a production-ready public API**.
 - Scheduled synchronization operates only while the server runs.
 - Browser-based WhatsApp click-to-chat should be tested on actual desktop/mobile devices before claiming end-to-end verification.
 
-## 📄 License
-
-Check whether the repository contains a `LICENSE` file. If you want others to reuse or distribute this code, choose and add an explicit license. Publishing a repository publicly does not itself grant reuse rights.
 
 ## 👨‍💻 Developer
 
