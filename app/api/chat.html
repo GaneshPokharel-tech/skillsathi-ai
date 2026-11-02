@@ -156,6 +156,13 @@
     }
     .prompt:hover { background: #e5f5ec; border-color: var(--green); }
     .composer { border-top: 1px solid var(--line); padding: 16px 24px 14px; }
+    .whatsapp-contact {
+      display: block; width: fit-content; max-width: 100%; margin: 0 auto 12px;
+      padding: 11px 16px; border: 0; border-radius: 12px;
+      background: #25d366; color: #073b20; font-size: 14px; font-weight: 750;
+      line-height: 1.4; text-align: center;
+    }
+    .whatsapp-contact:hover { background: #20bd5a; }
     .composer form { display: flex; gap: 11px; align-items: flex-end; }
     textarea {
       flex: 1; min-width: 0; resize: none; max-height: 140px;
@@ -182,6 +189,7 @@
       .message { max-width: 96%; }
       .prompts { padding: 0 13px 12px; }
       .composer { padding: 12px 13px; }
+      .whatsapp-contact { width: 100%; }
       .send { padding: 13px; }
     }
 
@@ -796,6 +804,7 @@
         <button type="button" class="prompt" data-prompt="analytics"></button>
       </div>
       <div class="composer">
+        <button id="whatsapp-contact" class="whatsapp-contact" type="button">WhatsApp मा सम्पर्क गर्नुहोस्</button>
         <form id="chat-form">
           <textarea id="question" rows="1" maxlength="2000" required aria-label="Your question"></textarea>
           <button id="send" class="send" type="submit"></button>
@@ -815,6 +824,7 @@
     const form = document.getElementById("chat-form");
     const input = document.getElementById("question");
     const send = document.getElementById("send");
+    const whatsappButton = document.getElementById("whatsapp-contact");
     const suggestions = [...document.querySelectorAll("[data-prompt]")];
     const languageButtons = [...document.querySelectorAll("[data-language]")];
     let selectedLanguage = null;
@@ -1315,6 +1325,11 @@
     input.addEventListener("input", () => {
       input.style.height = "auto";
       input.style.height = Math.min(input.scrollHeight, 140) + "px";
+    });
+    whatsappButton.addEventListener("click", () => {
+      const message = "Namaste SkillShikshya! I have an inquiry about your courses and admission. Please help me with the details.";
+      const whatsappUrl = "https://wa.me/9779868730959?text=" + encodeURIComponent(message);
+      window.open(whatsappUrl, "_blank", "noopener,noreferrer");
     });
   </script>
 </body>
