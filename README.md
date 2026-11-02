@@ -1,21 +1,22 @@
 
-# SkillSathi AI | SkillShikshya Guide
-
 <div align="center">
 
-### Your bilingual AI companion for skills, courses and career exploration
+# SkillSathi AI | SkillShikshya Guide
 
-An AI-powered, website-grounded chatbot helping learners explore **SkillShikshya** courses, practical skills, career paths and training opportunities in **English, नेपाली and Romanized Nepali**.
+### A bilingual, website-grounded AI assistant for learning and career exploration
+
+Ask about **SkillShikshya courses, skills, training and career options** in **English, नेपाली, or Romanized Nepali**. SkillSathi AI retrieves relevant website content and responds using source-grounded evidence.
 
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Qdrant](https://img.shields.io/badge/Vector%20DB-Qdrant-DC244C)](https://qdrant.tech/)
 [![Gemini](https://img.shields.io/badge/AI-Google%20Gemini-4285F4?logo=google&logoColor=white)](https://ai.google.dev/)
-[![Tests](https://img.shields.io/badge/Reported%20tests-266%20passed-brightgreen)](#verification--project-status)
+[![Streamlit](https://img.shields.io/badge/Demo-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![Tests](https://img.shields.io/badge/Latest%20reported%20tests-283%20passed-brightgreen)](#-testing--verification)
 
-[Explore Features](#-features) · [Quick Start](#-quick-start) · [Architecture](#-how-it-works) · [Sync Workflow](#-automatic-knowledge-synchronization) · [Testing](#-testing)
+[Features](#-features) · [Quick Start](#-quick-start) · [Architecture](#-how-it-works) · [API](#-api--websocket) · [Testing](#-testing--verification)
 
-**[SkillShikshya Website](https://skillshikshya.com)**
+**[SkillShikshya Website](https://skillshikshya.com/)** · **[Source Repository](https://github.com/GaneshPokharel-tech/skillsathi-ai)**
 
 </div>
 
@@ -23,75 +24,81 @@ An AI-powered, website-grounded chatbot helping learners explore **SkillShikshya
 
 ## ✨ Features
 
-| Capability | What it does |
+| Capability | Description |
 | --- | --- |
-| 🌐 Bilingual conversations | Understands English, Nepali and Romanized Nepali questions |
-| 📚 Website-grounded answers | Uses indexed SkillShikshya website content as evidence |
-| 🎓 Course discovery | Explains available courses and relevant details |
-| ⚖️ Course comparisons | Compares relevant training programs |
-| 🧭 Career guidance | Helps explore skills, learning routes and career opportunities |
-| 💬 Multiple questions | Handles more than one question per message |
-| 🔗 Source citations | Links back to supporting SkillShikshya pages |
-| 🔄 Automatic syncing | Checks for website changes on a schedule |
-| 🧩 Incremental indexing | Reuses unchanged vectors and embeds changed content |
-| ✅ Safe activation | Validates a new knowledge collection before switching to it |
-| 🖥️ Web chat | Includes a SkillShikshya-themed HTML, CSS and JavaScript interface |
+| 🌐 English & Nepali | Accepts English, Nepali and Romanized Nepali questions; responses can be set to English or Nepali (Devanagari). |
+| 📚 Website-grounded RAG | Uses retrieved SkillShikshya content rather than relying only on model memory. |
+| 🧭 Multi-tool agent | Routes questions to course discovery, course details, comparison, knowledge search or clarification. |
+| 🎓 Course exploration | Helps learners find courses and understand information available on the website. |
+| 💬 Multi-question support | Handles supported messages containing several questions. |
+| 🔗 Validated citations | Shows supporting website sources when a properly cited answer is available. |
+| ⚡ REST & WebSocket | FastAPI `/chat` and `/ws/chat`, with browser-side HTTP fallback. |
+| 🖥️ Web and Streamlit interfaces | Custom browser chatbot and a separate Streamlit demonstration. |
+| 🔄 Knowledge synchronization | Optional scheduled content refresh with incremental indexing and validated collection activation. |
+| 📲 WhatsApp contact | Opens a prefilled WhatsApp chat after a user click; the student sends the message manually. |
+| 🧩 Embeddable widget | Serves a frontend widget through `/widget.js`. |
 
 ## 🚀 Quick Start
 
-**Requirements:** Python 3.12+, [uv](https://docs.astral.sh/uv/), Git, a Google Gemini API key, and Crawl4AI browser dependencies.
+### Requirements
 
-<details open>
-<summary><strong>1. Clone and install</strong></summary>
+- Python **3.12+** and [uv](https://docs.astral.sh/uv/)
+- Git
+- A **Google Gemini API key**
+- Crawl4AI browser dependencies (see its [installation guide](https://docs.crawl4ai.com/core/installation/))
+
+### 1. Clone and install
 
 ```bash
-git clone https://github.com/<YOUR_USERNAME>/skillsathi-ai.git
+git clone https://github.com/GaneshPokharel-tech/skillsathi-ai.git
 cd skillsathi-ai
-uv sync
+uv sync --frozen
 ```
 
-Replace `<YOUR_USERNAME>` with the GitHub account or organisation that hosts this repository.
+> If the repository is still private, you need GitHub access to clone it.
 
-</details>
+### 2. Set up Crawl4AI
 
-<details open>
-<summary><strong>2. Configure the environment</strong></summary>
+```bash
+uv run crawl4ai-setup
+```
+
+If browser setup fails, follow the operating-system instructions in the Crawl4AI documentation.
+
+### 3. Configure the environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and set `GEMINI_API_KEY`. Never commit `.env` or disclose your API key.
+Edit `.env` and provide your Gemini API key.
 
 | Variable | Purpose |
 | --- | --- |
-| `GEMINI_API_KEY` | Gemini API credential |
-| `GEMINI_MODEL` | Optional model configuration |
-| `SKILLSHIKSHYA_AUTO_SYNC_ENABLED` | Enables or disables scheduled refreshes |
-| `SKILLSHIKSHYA_AUTO_SYNC_INTERVAL_HOURS` | Refresh interval in hours |
+| `GEMINI_API_KEY` | Gemini API credential for answer generation. |
+| `GEMINI_MODEL` | Optional Gemini model setting. |
+| `SKILLSHIKSHYA_AUTO_SYNC_ENABLED` | Whether to enable scheduled knowledge refreshes. |
+| `SKILLSHIKSHYA_AUTO_SYNC_INTERVAL_HOURS` | Refresh interval in hours. |
 
-</details>
+**Never commit `.env` or API keys to Git.**
 
-<details open>
-<summary><strong>3. Bootstrap the knowledge database (fresh installations only)</strong></summary>
+### 4. Bootstrap the knowledge database (fresh install only)
 
-Make sure the server is stopped and the knowledge database has not been initialized.
+Stop the API server and ensure the local knowledge database has not been initialized. Then run:
 
 ```bash
 uv run python -m app.ingestion.bootstrap
 ```
 
-Bootstrap discovers eligible public pages, crawls and verifies content, generates embeddings, creates and verifies a Qdrant collection, activates the `skillshikshya_active` alias, and records an activation receipt.
+The bootstrap discovers approved pages, crawls and cleans content, creates embeddings, builds a Qdrant collection, validates it and activates the verified collection.
 
 > [!CAUTION]
-> Run bootstrap **only on a fresh installation with an empty knowledge database**. The command is designed to refuse to overwrite an initialized database.
+> Run bootstrap **only on a fresh installation with an uninitialized knowledge database**. It is not a command for resetting an existing working database.
 
-</details>
-
-<details open>
-<summary><strong>4. Start the chat server</strong></summary>
+### 5. Start FastAPI
 
 ```bash
+SKILLSHIKSHYA_AUTO_SYNC_ENABLED=0 \
 uv run uvicorn app.api.server:app \
   --host 127.0.0.1 \
   --port 8000 \
@@ -100,10 +107,19 @@ uv run uvicorn app.api.server:app \
 
 Open **http://127.0.0.1:8000**.
 
-</details>
+**Important:** This project currently uses local embedded Qdrant. Keep the API at **one worker** and avoid opening the same Qdrant storage from another server process.
 
-<details>
-<summary><strong>Optional: Start with automatic synchronization</strong></summary>
+### 6. Run the Streamlit demo (optional)
+
+Keep FastAPI running. In a **second terminal**:
+
+```bash
+uv run streamlit run app/demo/streamlit_app.py
+```
+
+Open the URL shown by Streamlit (normally **http://127.0.0.1:8501**). Streamlit calls the FastAPI backend; it does not independently open Qdrant.
+
+### Optional: Start with automatic knowledge synchronization
 
 ```bash
 SKILLSHIKSHYA_AUTO_SYNC_ENABLED=1 \
@@ -114,62 +130,125 @@ uv run uvicorn app.api.server:app \
   --workers 1
 ```
 
-The scheduler runs **only while the server is running**. Local embedded Qdrant should be accessed by **one server worker**.
-
-</details>
+Scheduled refreshes operate **only while this server process is running**.
 
 ## 🧠 How It Works
 
-SkillSathi AI uses **Retrieval-Augmented Generation (RAG)** to answer questions using source material retrieved from SkillShikshya, rather than relying on the language model's memory alone.
+SkillSathi AI implements **Retrieval-Augmented Generation (RAG)** to answer questions from indexed SkillShikshya website evidence.
 
 ```mermaid
 flowchart TD
-    A[SkillShikshya public pages] --> B[Crawl4AI discovery and crawling]
+    A[Approved SkillShikshya pages] --> B[Crawl4AI discovery and crawling]
     B --> C[Clean and chunk content]
     C --> D[FastEmbed embeddings]
     D --> E[(Qdrant vector database)]
-    F[Student question] --> G[Question routing and retrieval]
-    E --> G
-    G --> H[Google Gemini answer generation]
-    H --> I[Answer with source citations]
+    F[Student question] --> G[Validation and agent routing]
+    G --> H[Course tools or knowledge search]
+    E --> H
+    H --> I[Relevant website evidence]
+    I --> J[Gemini answer generation]
+    J --> K[Citation validation]
+    K --> L[Answer with sources or safe fallback]
 ```
 
-**Pipeline:** Website discovery → crawling → cleaning and chunking → embeddings → Qdrant storage → retrieval → Gemini response → source citations.
+**Pipeline:** Website → crawling → content processing → embeddings → Qdrant → agent tool selection → retrieval → Gemini → validated response.
+
+### Agent tools
+
+| Tool | Role |
+| --- | --- |
+| `list_courses` | Lists courses available in the indexed catalogue. |
+| `get_course_details` | Returns details for one identified course. |
+| `compare_courses` | Compares two identifiable courses. |
+| `knowledge_search` | Retrieves supporting evidence for general website questions. |
+| `clarify` | Requests clarification for ambiguous course requests. |
+
+A greeting-only message can receive a deterministic local response without a Gemini call. For RAG responses, missing or invalid source citations are not silently fabricated; the system uses a safe fallback when a response contains no valid citation markers.
 
 ## 🔄 Automatic Knowledge Synchronization
 
-Scheduled refreshes discover and verify eligible pages, detect changed content, reuse vectors for unchanged content, embed changes, validate the new collection, and then activate it.
+Optional scheduled refreshes check approved public pages, detect changes and validate new knowledge before activation.
 
 ```mermaid
 flowchart TD
-    A[Scheduled website check] --> B[Verified website snapshot]
+    A[Scheduled website check] --> B[Approved page snapshot]
     B --> C{Content changed?}
-    C -- No --> D[Keep active knowledge]
-    C -- Yes --> E[Reuse vectors and embed changes]
-    E --> F{Collection validation passes?}
-    F -- Yes --> G[Activate verified collection]
-    F -- No --> D
+    C -- No --> D[Keep active collection]
+    C -- Yes --> E[Reuse unchanged vectors]
+    E --> F[Embed changed content]
+    F --> G[Build candidate collection]
+    G --> H{Validation passes?}
+    H -- Yes --> I[Activate verified collection]
+    H -- No --> D
 ```
 
-> [!IMPORTANT]
-> If a refresh fails before activation, the workflow is designed to preserve the previously active knowledge collection.
+This process is designed to preserve the existing active collection if a refresh fails before activation. It does not continuously run when the API server is stopped.
+
+## 🔌 API & WebSocket
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `GET` | `/` | Serves the web chat interface. |
+| `GET` | `/health` | Application health endpoint. |
+| `POST` | `/chat` | Website-grounded chatbot API. |
+| `WEBSOCKET` | `/ws/chat` | Persistent chat transport. |
+| `GET` | `/widget.js` | Embeddable chatbot widget. |
+| `GET` | `/brand-icon` | Brand icon resource. |
+
+### REST example
+
+```bash
+curl -X POST http://127.0.0.1:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "What courses are available?",
+    "language": "en",
+    "top_k": 4
+  }'
+```
+
+| Request field | Description |
+| --- | --- |
+| `question` | Required question, maximum 2,000 characters. |
+| `language` | `en` or `ne`; default `ne`. |
+| `top_k` | Integer from 1 to 10; default 4. |
+| `pending_course_urls` | Optional course-selection context for supported follow-ups. |
+
+Responses contain an answer and citation data when available. A model-generated answer lacking valid evidence markers gets a localized fallback rather than fabricated source references.
+
+### Browser transport
+
+- WebSocket: `ws://127.0.0.1:8000/ws/chat` for local use.
+- REST fallback: `POST /chat`.
+- For an HTTPS deployment, use `wss://` with a correctly configured reverse proxy.
+
+## 📲 WhatsApp Contact
+
+The browser chat includes **“WhatsApp मा सम्पर्क गर्नुहोस्”**.
+
+- Destination: **+977 9868730959**.
+- A click opens `wa.me` with a generic prefilled course/admission inquiry.
+- The student reviews or edits the message and presses **Send** in WhatsApp.
+- The app does **not** automatically send messages, collect a lead form or email student details.
 
 ## 🧰 Technology Stack
 
 | Layer | Technology |
 | --- | --- |
 | Language | Python 3.12+ |
-| API backend | FastAPI |
-| Frontend | HTML, CSS, JavaScript |
-| Website crawling | Crawl4AI |
-| Embeddings | FastEmbed with `BAAI/bge-small-en-v1.5` |
-| Vector storage | Qdrant |
+| Backend | FastAPI |
+| Browser UI | HTML, CSS, JavaScript |
+| Demo UI | Streamlit |
+| WebSocket transport | FastAPI WebSocket |
+| Crawling | Crawl4AI |
+| Embeddings | FastEmbed / `BAAI/bge-small-en-v1.5` |
+| Vector database | Qdrant (embedded local storage) |
 | Answer generation | Google Gemini |
-| Dependencies | uv |
+| Dependency management | uv |
 | Tests | Python `unittest` |
 
 <details>
-<summary><strong>📁 Explore project structure</strong></summary>
+<summary><strong>📁 Project Structure</strong></summary>
 
 ```text
 skillsathi-ai/
@@ -182,7 +261,10 @@ skillsathi-ai/
 │   │   ├── server.py
 │   │   ├── chat.html
 │   │   └── widget.js
+│   ├── demo/
+│   │   └── streamlit_app.py
 │   ├── ingestion/
+│   │   ├── bootstrap.py
 │   │   ├── crawler.py
 │   │   ├── auto_sync.py
 │   │   ├── auto_sync_scheduler.py
@@ -191,7 +273,7 @@ skillsathi-ai/
 │   └── rag/
 │       └── engine.py
 ├── tests/
-├── data/                  # Generated locally, not committed
+├── data/                 # Local generated content; not tracked in Git
 ├── pyproject.toml
 ├── uv.lock
 ├── .env.example
@@ -201,71 +283,63 @@ skillsathi-ai/
 
 </details>
 
-## 🧪 Testing
+## 🧪 Testing & Verification
 
-Run the full regression suite:
+Run the regression suite:
 
 ```bash
 uv run python -m unittest discover -s tests -q
 ```
 
-Coverage areas include question routing, RAG, crawling and ingestion, change detection, incremental activation, scheduling and multi-question handling.
-
-## 📊 Verification & Project Status
-
-The following checkpoints are **project-provided reports**, not independently rerun as part of preparing this README.
+The latest **user-reported** run at commit `95cc164` passed **283 tests**. Test areas include routing, RAG, citations, crawling, indexing, scheduled synchronization, REST, WebSocket, Streamlit and the WhatsApp button.
 
 | Checkpoint | Reported result |
 | --- | --- |
-| October 31, 2026 clean-clone verification | **266 automated tests passed** |
-| Fresh dependencies | `uv sync --frozen` succeeded |
-| Live crawl | 38 approved public pages |
-| Knowledge indexing | 38 verified pages, 857 vectors |
-| Local Qdrant | Initial collection activated |
-| URL controls | Unapproved URLs excluded from bootstrap |
-| Earlier local checkpoint | **262 automated tests passed** |
-
-Page and vector totals may change as the source website changes.
+| Full regression suite | **283 passed** |
+| Latest WhatsApp commit | `95cc164` — pushed to `main` |
+| Git working tree after push | Clean |
+| Earlier fresh-clone website crawl | 38 approved pages |
+| Earlier vector indexing | 857 indexed vectors, active collection verified |
+| Git-tracked sensitive files audit | 0 paths flagged in the earlier audit |
 
 > [!NOTE]
-> The supplied project notes also say bootstrap passed unit tests and an isolated integration test with a verified **40-page snapshot and synthetic embeddings**, while full live-crawl/real-embedding acceptance remained pending. That statement conflicts with the separate clean-clone verification claim above. **Confirm which checkpoint is the release-authoritative result before publishing final acceptance claims.**
-
-### MVP status
-
-**Implemented and locally tested:** website-grounded answers, bilingual questions, course discovery and comparison, multi-question routing, citations, scheduled synchronization, verified incremental activation and regression tests.
-
-**Release checklist:**
-
-- [ ] Reconcile clean-clone and bootstrap acceptance records
-- [ ] Complete deployment and security review
-- [ ] Publish repository to GitHub
-- [ ] Confirm fresh-clone acceptance in the intended release environment
+> These results were reported during development. The 38-page / 857-vector crawl checkpoint predates the latest WebSocket, Streamlit and WhatsApp commits. The latest revision has not been independently revalidated from a fresh clone for this README.
 
 ## 🔐 Security & Data Handling
 
-The repository is intended to exclude secrets and generated local data, including `.env`, crawl snapshots, `data/`, Qdrant database files, virtual environments, caches and logs.
+- `.env`, generated crawl data and local Qdrant files should remain excluded from Git.
+- Gemini credentials belong in environment variables, never in source code.
+- The ingestion scope is limited to configured approved SkillShikshya pages.
+- Retrieved website text is untrusted reference material, not executable instructions.
+- API exception logging is designed to record exception types rather than student questions.
+- WhatsApp requires an explicit click and a separate user action to send the prefilled message.
 
-- Keep API keys in environment variables, not source files.
-- Treat retrieved website content as **untrusted reference data**.
-- Do not follow instructions embedded in retrieved pages.
-- Restrict ingestion to approved public pages.
+> [!WARNING]
+> **Do not enter passwords, government IDs, payment details or other sensitive personal information into chat.** Comprehensive PII detection/redaction is **not currently implemented**. User messages may be included in the Gemini prompt sent to the external API.
 
-## ⚠️ Limitations
+A **public GitHub repository is not the same as a production-ready public API**. Before internet deployment, review HTTPS, rate limiting, authentication as appropriate, abuse prevention, privacy, logging, dependency security and secret handling. Inspect the full Git history for accidentally committed secrets before changing repository visibility.
 
-- Answers are limited by the indexed SkillShikshya sources; this is not unrestricted web search.
-- Website marketing claims are not independent rankings or endorsements.
-- Information can become stale between refreshes.
-- New installations require initial knowledge bootstrap.
-- Scheduled syncing stops when its server process stops.
-- Embedded local Qdrant is not suitable for concurrent multi-worker deployment.
-- Public production hosting needs additional deployment and security validation.
+## ⚠️ Known Limitations
+
+- Answers are limited to indexed SkillShikshya information and may be incomplete or outdated.
+- The website scope is configured for **SkillShikshya**, not arbitrary user-submitted URLs.
+- There is no explicit hard Gemini output-token limit in the inspected implementation.
+- Comprehensive server-side PII redaction is not implemented.
+- Embedded local Qdrant uses single-process access; it is not a multi-worker deployment architecture.
+- Initial bootstrap is required for a new knowledge database.
+- Scheduled synchronization operates only while the server runs.
+- Browser-based WhatsApp click-to-chat should be tested on actual desktop/mobile devices before claiming end-to-end verification.
+
+## 📄 License
+
+Check whether the repository contains a `LICENSE` file. If you want others to reuse or distribute this code, choose and add an explicit license. Publishing a repository publicly does not itself grant reuse rights.
 
 ## 👨‍💻 Developer
 
-**Ganesh Pokharel**
-
+**Ganesh Pokharel**  
 **Project:** SkillSathi AI | SkillShikshya Guide  
-**Website content source:** [skillshikshya.com](https://skillshikshya.com)
+**Website content source:** [skillshikshya.com](https://skillshikshya.com)  
+**Repository:** [GaneshPokharel-tech/skillsathi-ai](https://github.com/GaneshPokharel-tech/skillsathi-ai)
 
 ---
 
