@@ -84,6 +84,36 @@ def _immediate_safety_reply(question: str, language: str):
     )
 
 
+
+def _simple_greeting_reply(question: str, language: str) -> str | None:
+    """Respond to greeting-only messages without external model calls."""
+    normalized = question.strip().casefold().strip("!?.,।").strip()
+
+    greetings = {
+        "hello", "hi", "hey",
+        "namaste", "namaskar",
+        "नमस्ते", "नमस्कार",
+    }
+
+    if normalized not in greetings:
+        return None
+
+    if language == "en":
+        return (
+            "Hello! I'm SkillSathi AI. I can help you with "
+            "SkillShikshya courses, training, admissions, "
+            "and online counselling. What would you like to know?"
+        )
+
+    return (
+        "नमस्ते! म SkillSathi AI हुँ। "
+        "SkillShikshya का कोर्स, तालिम, भर्ना र "
+        "अनलाइन परामर्शबारे जानकारी दिन सक्छु। "
+        "तपाईं के जान्न चाहनुहुन्छ?"
+    )
+
+
+
 def ask_agent(
     question: str,
     *,
@@ -122,6 +152,14 @@ def ask_agent(
     if safety_reply is not None:
         return {
             "answer": safety_reply,
+            "citations": [],
+            "retrieved_chunks": 0,
+        }
+
+    greeting = _simple_greeting_reply(question, language)
+    if greeting is not None:
+        return {
+            "answer": greeting,
             "citations": [],
             "retrieved_chunks": 0,
         }

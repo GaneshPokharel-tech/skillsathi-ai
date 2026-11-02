@@ -570,7 +570,21 @@ def answer_with_evidence(
                 cited_indices.append(index)
 
     if not cited_indices:
-        raise ValueError("Gemini answer has no valid evidence citations.")
+        # Do not expose unsupported model text or fabricate citations.
+        # A safe fallback avoids unnecessary additional Gemini tokens.
+        return {
+            "answer": (
+                "I could not verify a source-cited answer from the "
+                "available SkillShikshya evidence. "
+                "Please ask a more specific question."
+                if language == "en"
+                else
+                "उपलब्ध SkillShikshya स्रोतहरूबाट प्रमाणसहितको "
+                "उत्तर पुष्टि गर्न सकिनँ। "
+                "कृपया प्रश्न अझ स्पष्ट गरी सोध्नुहोस्।"
+            ),
+            "citations": [],
+        }
 
     citations = [
         {
